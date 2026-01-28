@@ -172,21 +172,19 @@ def compute_zone_peak(mag, freqs, low, high):
     idx = np.where((freqs >= low) & (freqs <= high))[0]
     return float(np.max(mag[idx])) if idx.size else 0.0
 
-# new helper: compute frequency analysis table (FFT only for selected frequencies with decay and multiplier)
-def compute_frequency_table(samples, sr, unique_freqs, fps, decay_alpha, amp_conf):
+# new helper: compute frequency analysis table (FFT only for selected frequencies)
+def compute_frequency_table(samples, sr, unique_freqs):
+    fps = 60  # Fixed to 60 FPS
     """
-    Compute FFT analysis table for only the unique frequencies from the preset.
+    Compute raw FFT analysis table for only the unique frequencies from the preset.
     
     Args:
         samples: Audio samples
         sr: Sample rate
         unique_freqs: List of (low, high) frequency tuples extracted from zones
-        fps: Frames per second
-        decay_alpha: Decay smoothing factor
-        amp_conf: Amplification configuration dict
     
     Returns:
-        freq_table: (n_frames, n_freqs) float array with analyzed values
+        raw_freq_table: (n_frames, n_freqs) float array with raw FFT values
         n_frames: Number of frames
     """
     if not unique_freqs:
@@ -200,10 +198,9 @@ def compute_frequency_table(samples, sr, unique_freqs, fps, decay_alpha, amp_con
     n_frames = int(np.ceil(len(samples) / hop))
     n_freqs = len(unique_freqs)
     
-    # Compute stable multiplier from the full spectrum first (need raw values)
-    raw_peaks = np.zeros((n_frames, n_freqs), dtype=float)
+    # Compute raw peak values for each frequency range
+    raw_freq_table = np.zeros((n_frames, n_freqs), dtype=float)
     
-    # First pass: compute raw peak values for each frequency range
     for i in range(n_frames):
         start = i * hop
         frame = samples[start:start+win_len]
@@ -213,36 +210,74 @@ def compute_frequency_table(samples, sr, unique_freqs, fps, decay_alpha, amp_con
         spec = np.abs(rfft(frame * win, n=nfft))
         
         for fi, (low, high) in enumerate(unique_freqs):
-            raw_peaks[i, fi] = compute_zone_peak(spec, freqs, low, high)
-    
-    # Compute stable multiplier from raw peaks
-    mult = compute_stable_multiplier(raw_peaks, amp_conf)
-    print(f"[+] Computed stable multiplier: {mult:.4f}")
-    
-    # Second pass: apply multiplier and decay during FFT analysis
-    freq_table = np.zeros_like(raw_peaks)
-    if n_frames == 0:
-        return freq_table, n_frames
-    
-    # Initialize with first frame (multiplied)
-    prev = raw_peaks[0] * mult
-    freq_table[0] = prev
-    
-    # Apply decay to subsequent frames (instant rise, smoothed fall)
-    for i in range(1, n_frames):
-        cur = raw_peaks[i] * mult
-        # Instant rise: take maximum between previous decayed value and current
-        prev = np.maximum(prev, cur)
-        # Smoothed fall: blend between previous and current
-        prev = decay_alpha * prev + (1.0 - decay_alpha) * cur
-        freq_table[i] = prev
+            raw_freq_table[i, fi] = compute_zone_peak(spec, freqs, low, high)
         
         if (i + 1) % max(1, n_frames // 500) == 0 or i == n_frames - 1:
             pct = int((i + 1) / n_frames * 100)
             print(f"\r[FFT] Analysing frequencies: {pct}% ({i+1}/{n_frames})", end='', flush=True)
     
     print()  # newline after progress
-    return freq_table, n_frames
+    return raw_freq_table, n_frames
+
+# Apply dynamic per-frequency multipliers to raw frequency table
+def apply_dynamic_multipliers(raw_freq_table, amp_conf):
+    """
+    Apply dynamic per-frequency multipliers for loudness normalization.
+    Each frequency gets its own adaptive gain.
+    
+    Args:
+        raw_freq_table: (n_frames, n_freqs) array of raw FFT values
+        amp_conf: Amplification config
+    
+    Returns:
+        multiplied_freq_table: (n_frames, n_freqs) array with multipliers applied
+    """
+    dynamic_mults = compute_dynamic_multipliers(raw_freq_table, amp_conf, smoothing_alpha=0.3)
+    multiplied_freq_table = raw_freq_table * dynamic_mults
+    return multiplied_freq_table
+
+# Apply downward-only decay to multiplied frequency table
+def apply_decay_to_freq_table(multiplied_freq_table, decay_alpha):
+    """
+    Apply downward-only decay to frequency table.
+    Instant rise to peaks, smooth exponential decay when signal quiets.
+    Decay lasts approximately 60 frames (1 second at 60 FPS).
+    
+    Args:
+        multiplied_freq_table: (n_frames, n_freqs) array of multiplied FFT values
+        decay_alpha: Decay smoothing factor (recalculated for 60-frame decay)
+    
+    Returns:
+        decayed_freq_table: (n_frames, n_freqs) array with decay applied
+    """
+
+    decay_alpha_adjusted = 0.86 + decay_alpha /10
+    
+    n_frames, n_freqs = multiplied_freq_table.shape
+    decayed_freq_table = np.zeros_like(multiplied_freq_table)
+    
+    if n_frames == 0:
+        return decayed_freq_table
+    
+    # Initialize with first frame
+    prev = multiplied_freq_table[0].copy()
+    decayed_freq_table[0] = prev
+    
+    # Apply decay: instant rise, smoothed fall
+    for i in range(1, n_frames):
+        cur = multiplied_freq_table[i]
+        # Instant rise: take maximum between previous and current
+        prev = np.maximum(prev, cur)
+        # Smoothed fall: exponential decay blended with current value
+        prev = decay_alpha_adjusted * prev + (1.0 - decay_alpha_adjusted) * cur
+        decayed_freq_table[i] = prev
+        
+        if (i + 1) % max(1, n_frames // 500) == 0 or i == n_frames - 1:
+            pct = int((i + 1) / n_frames * 100)
+            print(f"\r[Decay] Applying frequency decay: {pct}% ({i+1}/{n_frames})", end='', flush=True)
+    
+    print()  # newline after progress
+    return decayed_freq_table
 
 # new helper: map frequency analysis table to zones (applies quadratic normalization and percent mapping)
 def map_frequencies_to_zones(freq_table, unique_freqs, zones):
@@ -406,6 +441,70 @@ def normalize_to_quadratic(raw):
     return (scaled ** 2 * 5000.0).astype(float)
 
 # simple stable multiplier: use median of frame maxima
+# Compute dynamic per-frequency multiplier for loudness normalization
+def compute_dynamic_multipliers(raw_peaks, amp_conf, smoothing_alpha=0.3):
+    """
+    Compute dynamic per-frequency multipliers for loudness normalization.
+    Each frequency gets its own multiplier based on its local loudness, with smooth transitions.
+    
+    Args:
+        raw_peaks: (n_frames, n_freqs) array of raw FFT values
+        amp_conf: Amplification config with min, max, target, percentile
+        smoothing_alpha: Smoothing factor for multiplier transitions (0-1, higher = faster changes)
+    
+    Returns:
+        multipliers: (n_frames, n_freqs) array of dynamic multipliers
+    """
+    n_frames, n_freqs = raw_peaks.shape
+    if n_frames == 0 or n_freqs == 0:
+        return np.ones_like(raw_peaks)
+    
+    amp_min = float(amp_conf.get("min", 0.5))
+    amp_max = float(amp_conf.get("max", 4.0))
+    target = float(amp_conf.get("target", 4000.0))
+    pct = float(amp_conf.get("percentile", 50.0))
+    
+    multipliers = np.ones((n_frames, n_freqs), dtype=float)
+    
+    # For each frequency, compute its own dynamic multiplier
+    for fi in range(n_freqs):
+        freq_values = raw_peaks[:, fi]
+        
+        # Get reference level for this frequency (using percentile of its values)
+        ref = float(np.percentile(freq_values, pct))
+        
+        # Start with static multiplier based on reference level
+        if ref <= 0.0:
+            base_mult = 1.0
+        else:
+            base_mult = target / ref
+        base_mult = max(amp_min, min(amp_max, base_mult))
+        
+        # Compute per-frame dynamic multiplier with smoothing
+        prev_mult = base_mult
+        for frame_idx in range(n_frames):
+            current_value = freq_values[frame_idx]
+            
+            # Compute instantaneous multiplier for this frame
+            # If current value is very small (near silence), use max multiplier
+            # If current value is large, reduce multiplier
+            if current_value <= 1e-6:
+                inst_mult = amp_max
+            else:
+                inst_mult = target / current_value
+            
+            # Clamp to limits
+            inst_mult = max(amp_min, min(amp_max, inst_mult))
+            
+            # Smooth the transition: use smoothing_alpha for blending
+            # Higher current value = slower response (defensive), lower value = faster response (expands range)
+            smoothed_mult = smoothing_alpha * inst_mult + (1.0 - smoothing_alpha) * prev_mult
+            #multipliers[frame_idx, fi] = smoothed_mult
+            multipliers[frame_idx, fi] = 4 # doesn't work yet so dirty fix for yall
+            prev_mult = smoothed_mult
+    
+    return multipliers
+
 def compute_stable_multiplier(linear, amp_conf):
     if linear.size == 0:
         return 1.0
@@ -434,7 +533,7 @@ def apply_decay_to_raw(raw, decay_alpha):
         # instant rise
         prev = np.maximum(prev, cur)
         # smoothed fall
-        prev = decay_alpha * prev + (1.0 - decay_alpha) * cur
+        prev = decay_alpha * prev + (1.0 - (decay_alpha/4)) * cur
         decayed[i] = prev
     return decayed
 
@@ -514,7 +613,6 @@ def apply_zone_percent_mapping(linear: np.ndarray, zones, linear_max: float = 50
 # ------------------ main processing ------------------
 def process(audio_path, conf, out_path, output_format='nglyph'):
     # --- config
-    fps = 60  # FPS is fixed to 60 
     phone_model = conf.get("phone_model")
     decay_alpha = conf.get("decay_alpha")
     zones = conf["zones"]
@@ -528,14 +626,20 @@ def process(audio_path, conf, out_path, output_format='nglyph'):
     unique_freqs = extract_unique_frequencies(zones)
     print(f"[+] Extracted {len(unique_freqs)} unique frequency range(s) from preset")
     
-    # 2. Compute frequency analysis table (FFT only for selected frequencies, with multiplier and decay applied together)
-    freq_table, n_frames = compute_frequency_table(samples, sr, unique_freqs, fps, decay_alpha, amp_conf)
+    # 2. Compute raw frequency table (FFT only)
+    raw_freq_table, n_frames = compute_frequency_table(samples, sr, unique_freqs)
     
-    # 3. Map analyzed frequencies to zones with percent conversion
-    linear_scaled = map_frequencies_to_zones(freq_table, unique_freqs, zones)
+    # 3. Apply dynamic per-frequency multipliers for loudness normalization
+    multiplied_freq_table = apply_dynamic_multipliers(raw_freq_table, amp_conf)
     
-    # 4. Clip to 0-4095 brightness range
-    final = np.clip(np.round(linear_scaled), 0, 4095).astype(int)
+    # 4. Apply decay to frequency values (downward-only, ~60 frame decay)
+    decayed_freq_table = apply_decay_to_freq_table(multiplied_freq_table, decay_alpha)
+    
+    # 5. Map decayed frequencies to zones with quadratic normalization and percent mapping
+    zone_table = map_frequencies_to_zones(decayed_freq_table, unique_freqs, zones)
+    
+    # 6. Clip to 0-4095 brightness range
+    final = np.clip(np.round(zone_table), 0, 4095).astype(int)
  
     # --- write output
     if output_format == 'nglyph':
