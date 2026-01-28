@@ -20,7 +20,35 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
 
-# VERSION 1.0.0 OF THE SCRIPT.
+# VERSION 1.1.0 OF THE SCRIPT.
+
+"""
+/*/*/* NEW ANALYSIS PIPELINE!! */*/*/
+
+Audio File (original audio quality is reused and not mono)
+    ↓
+Load Audio for analysis(mono, float32)
+    ↓
+Extract Unique Frequencies from Preset ← [low, high] from all zones to avoid wasting time on duplicate frequencies
+    ↓
+Compute Frequency Analysis Table
+    ├─ FFT for each frame
+    ├─ Only process unique frequencies
+    ├─ Apply stable multiplier
+    └─ Apply decay (using previous row of the table stored in ram)
+    ↓
+Map Frequencies to Zones
+    ├─ Quadratic normalization
+    └─ Percent conversion
+    ↓
+Clip to Brightness Range (0-4095)
+    ↓
+Output (NGlyph/CSV/Compact)
+    ↓
+Run GlyphModder to embed OGG (if needed)
+    ↓
+Done!
+"""
 
 import os, sys, json, subprocess
 import numpy as np
@@ -121,9 +149,200 @@ def next_pow2(n):
         p <<= 1
     return p
 
+def extract_unique_frequencies(zones):
+    """
+    Extract all unique/different frequencies from the preset zones.
+    Each zone is [low_freq, high_freq, description?, ...].
+    Returns sorted list of tuples: [(low, high), ...] representing all frequency ranges.
+    """
+    freqs = set()
+    for zone in zones:
+        if isinstance(zone, (list, tuple)) and len(zone) >= 2:
+            try:
+                low = float(zone[0])
+                high = float(zone[1])
+                if low > high:
+                    low, high = high, low
+                freqs.add((low, high))
+            except (ValueError, TypeError):
+                continue
+    return sorted(list(freqs))
+
 def compute_zone_peak(mag, freqs, low, high):
     idx = np.where((freqs >= low) & (freqs <= high))[0]
     return float(np.max(mag[idx])) if idx.size else 0.0
+
+# new helper: compute frequency analysis table (FFT only for selected frequencies with decay and multiplier)
+def compute_frequency_table(samples, sr, unique_freqs, fps, decay_alpha, amp_conf):
+    """
+    Compute FFT analysis table for only the unique frequencies from the preset.
+    
+    Args:
+        samples: Audio samples
+        sr: Sample rate
+        unique_freqs: List of (low, high) frequency tuples extracted from zones
+        fps: Frames per second
+        decay_alpha: Decay smoothing factor
+        amp_conf: Amplification configuration dict
+    
+    Returns:
+        freq_table: (n_frames, n_freqs) float array with analyzed values
+        n_frames: Number of frames
+    """
+    if not unique_freqs:
+        return np.array([]).reshape(0, 0), 0
+    
+    hop = int(round(sr / float(fps)))
+    win_len = int(round(sr * 0.025))
+    win = get_window("hann", win_len, fftbins=True)
+    nfft = next_pow2(win_len)
+    freqs = rfftfreq(nfft, 1 / sr)
+    n_frames = int(np.ceil(len(samples) / hop))
+    n_freqs = len(unique_freqs)
+    
+    # Compute stable multiplier from the full spectrum first (need raw values)
+    raw_peaks = np.zeros((n_frames, n_freqs), dtype=float)
+    
+    # First pass: compute raw peak values for each frequency range
+    for i in range(n_frames):
+        start = i * hop
+        frame = samples[start:start+win_len]
+        if frame.size < win_len:
+            pad_width: Tuple[int, int] = (0, int(win_len - int(frame.size)))
+            frame = np.pad(frame, pad_width)
+        spec = np.abs(rfft(frame * win, n=nfft))
+        
+        for fi, (low, high) in enumerate(unique_freqs):
+            raw_peaks[i, fi] = compute_zone_peak(spec, freqs, low, high)
+    
+    # Compute stable multiplier from raw peaks
+    mult = compute_stable_multiplier(raw_peaks, amp_conf)
+    print(f"[+] Computed stable multiplier: {mult:.4f}")
+    
+    # Second pass: apply multiplier and decay during FFT analysis
+    freq_table = np.zeros_like(raw_peaks)
+    if n_frames == 0:
+        return freq_table, n_frames
+    
+    # Initialize with first frame (multiplied)
+    prev = raw_peaks[0] * mult
+    freq_table[0] = prev
+    
+    # Apply decay to subsequent frames (instant rise, smoothed fall)
+    for i in range(1, n_frames):
+        cur = raw_peaks[i] * mult
+        # Instant rise: take maximum between previous decayed value and current
+        prev = np.maximum(prev, cur)
+        # Smoothed fall: blend between previous and current
+        prev = decay_alpha * prev + (1.0 - decay_alpha) * cur
+        freq_table[i] = prev
+        
+        if (i + 1) % max(1, n_frames // 500) == 0 or i == n_frames - 1:
+            pct = int((i + 1) / n_frames * 100)
+            print(f"\r[FFT] Analysing frequencies: {pct}% ({i+1}/{n_frames})", end='', flush=True)
+    
+    print()  # newline after progress
+    return freq_table, n_frames
+
+# new helper: map frequency analysis table to zones (applies quadratic normalization and percent mapping)
+def map_frequencies_to_zones(freq_table, unique_freqs, zones):
+    """
+    Map analyzed frequencies to their corresponding glyph zones.
+    Applies quadratic normalization and percentage conversion here.
+    
+    Args:
+        freq_table: (n_frames, n_unique_freqs) float array from compute_frequency_table
+        unique_freqs: List of (low, high) frequency tuples
+        zones: List of zone entries [low, high, desc?, low_percent?, high_percent?]
+    
+    Returns:
+        zone_table: (n_frames, n_zones) float array with values in brightness range (0-5000)
+    """
+    n_frames, n_unique_freqs = freq_table.shape
+    n_zones = len(zones)
+    zone_table = np.zeros((n_frames, n_zones), dtype=float)
+    
+    # Build mapping: for each zone, find which frequency ranges it covers
+    for zi, zone in enumerate(zones):
+        if not (isinstance(zone, (list, tuple)) and len(zone) >= 2):
+            continue
+        try:
+            zone_low = float(zone[0])
+            zone_high = float(zone[1])
+        except (ValueError, TypeError):
+            continue
+        
+        if zone_low > zone_high:
+            zone_low, zone_high = zone_high, zone_low
+        
+        # Find which unique_freqs overlap with this zone
+        overlapping_indices = []
+        for fi, (freq_low, freq_high) in enumerate(unique_freqs):
+            # Check if frequency range overlaps with zone
+            if not (freq_high < zone_low or freq_low > zone_high):
+                overlapping_indices.append(fi)
+        
+        if not overlapping_indices:
+            zone_table[:, zi] = 0.0
+            continue
+        
+        # For each frame, take max from overlapping frequencies
+        for frame_idx in range(n_frames):
+            zone_table[frame_idx, zi] = np.max(freq_table[frame_idx, overlapping_indices])
+    
+    # Apply quadratic normalization per zone (normalize to 0-5000)
+    zone_max = np.max(zone_table, axis=0)
+    zone_max[zone_max == 0] = 1e-12
+    normalized = zone_table / zone_max
+    quadratic = normalized ** 2 * 5000.0
+    
+    # Apply per-zone percent mapping (if zone has low_percent and high_percent)
+    def _parse_percent(v):
+        try:
+            if isinstance(v, str):
+                s = v.strip()
+                if s.endswith('%'):
+                    s = s[:-1].strip()
+                val = float(s)
+            else:
+                val = float(v)
+        except Exception:
+            return None
+        if 0.0 <= val <= 1.0:
+            return val * 100.0
+        return val
+    
+    result = quadratic.copy()
+    for zi, zone in enumerate(zones):
+        if not (isinstance(zone, (list, tuple)) and len(zone) >= 5):
+            continue
+        low = _parse_percent(zone[3])
+        high = _parse_percent(zone[4])
+        if low is None or high is None:
+            continue
+        low = max(0.0, min(100.0, low))
+        high = max(0.0, min(100.0, high))
+        if low > high:
+            low, high = high, low
+        
+        percents = (quadratic[:, zi] / 5000.0) * 100.0
+        if high == low:
+            mask_hi = percents >= high
+            result[:, zi] = 0.0
+            result[mask_hi, zi] = 5000.0
+            continue
+        
+        below = percents <= low
+        above = percents >= high
+        between = (~below) & (~above)
+        
+        result[below, zi] = 0.0
+        result[above, zi] = 5000.0
+        if np.any(between):
+            result[between, zi] = ((percents[between] - low) / (high - low)) * 5000.0
+    
+    print("[+] Processed frequency-to-zone mapping with percent conversion.")
+    return result
 
 # new helper: compute raw per-frame zone peaks (simpler, with light progress)
 def compute_raw_matrix(samples, sr, zones, fps):
@@ -295,79 +514,72 @@ def apply_zone_percent_mapping(linear: np.ndarray, zones, linear_max: float = 50
 # ------------------ main processing ------------------
 def process(audio_path, conf, out_path, output_format='nglyph'):
     # --- config
-     fps = 60  # FPS is fixed to 60 
-     phone_model = conf.get("phone_model")
-     decay_alpha = conf.get("decay_alpha")
-     zones = conf["zones"]
-     amp_conf = conf.get("amp")
+    fps = 60  # FPS is fixed to 60 
+    phone_model = conf.get("phone_model")
+    decay_alpha = conf.get("decay_alpha")
+    zones = conf["zones"]
+    amp_conf = conf.get("amp")
  
-     # --- audio analysis
-     samples, sr = load_audio_mono(audio_path)
+    # --- audio analysis
+    samples, sr = load_audio_mono(audio_path)
+    
+    # NEW PIPELINE:
+    # 1. Extract unique frequencies from the preset
+    unique_freqs = extract_unique_frequencies(zones)
+    print(f"[+] Extracted {len(unique_freqs)} unique frequency range(s) from preset")
+    
+    # 2. Compute frequency analysis table (FFT only for selected frequencies, with multiplier and decay applied together)
+    freq_table, n_frames = compute_frequency_table(samples, sr, unique_freqs, fps, decay_alpha, amp_conf)
+    
+    # 3. Map analyzed frequencies to zones with percent conversion
+    linear_scaled = map_frequencies_to_zones(freq_table, unique_freqs, zones)
+    
+    # 4. Clip to 0-4095 brightness range
+    final = np.clip(np.round(linear_scaled), 0, 4095).astype(int)
  
-     # compute raw matrix
-     raw, n_frames = compute_raw_matrix(samples, sr, zones, fps)
- 
-     # normalize to quadratic linear 0..5000
-     linear = normalize_to_quadratic(raw)
- 
-     # apply stable multiplier
-     linear_scaled = apply_multiplier_only(linear, amp_conf)
- 
-    # apply per-zone percent mapping (optional zone[3], zone[4]) on scaled values
-     try:
-         linear_scaled = apply_zone_percent_mapping(linear_scaled, zones, linear_max=4095.0)
-     except Exception as e:
-         print(f"[!] Warning: zone percent mapping failed: {e}")
-  
-     # apply decay to scaled brightness values
-     decayed_linear = apply_decay_to_raw(linear_scaled, decay_alpha)
- 
-     # clip to 0-4095
-     final = np.clip(np.round(decayed_linear), 0, 4095).astype(int)
- 
-     # --- write output
-     if output_format == 'nglyph':
-         author_rows = [",".join(map(str, row)) + "," for row in final]
-         ng = {
-             "VERSION": 1,
-             "PHONE_MODEL": phone_model,
-             "AUTHOR": author_rows,
-             "CUSTOM1": ["1-0", "1050-1"]
-         }
-         with open(out_path, "w", encoding="utf-8") as f:
-             json.dump(ng, f, indent=4)
-         print(f"[+] Saved NGlyph: {out_path}")
-     elif output_format == 'csv':
-         import csv
-         with open(out_path, "w", newline='', encoding="utf-8") as f:
-             writer = csv.writer(f)
-             # Write phone model
-             writer.writerow([f"PHONE_MODEL: {phone_model}"])
-             # Write header
-             header = [f"zone_{i}" for i in range(final.shape[1])]
-             writer.writerow(header)
-             # Write rows
-             for row in final:
-                 writer.writerow(row)
-         print(f"[+] Saved CSV: {out_path}")
-     elif output_format == 'compact':
-         # .musicviz binary format:
-         # - Text header: "PHONE_MODEL: <model>\n"
-         # - Binary: uint32 n_frames, uint32 n_zones
-         # - Binary: n_frames * n_zones uint16 brightness values (0-4095)
-         # Very space efficient for storage.
-         with open(out_path, "wb") as f:
-             # Write header as text
-             header = f"PHONE_MODEL: {phone_model}\n"
-             f.write(header.encode('utf-8'))
-             # Write dimensions and binary data
-             n_frames, n_zones = final.shape
-             import struct
-             f.write(struct.pack('II', n_frames, n_zones))
-             final_bytes = final.astype(np.uint16).tobytes()
-             f.write(final_bytes)
-         print(f"[+] Saved Compact: {out_path}")
-     return out_path
+    # --- write output
+    if output_format == 'nglyph':
+        author_rows = [",".join(map(str, row)) + "," for row in final]
+        ng = {
+            "VERSION": 1,
+            "PHONE_MODEL": phone_model,
+            "AUTHOR": author_rows,
+            "CUSTOM1": ["1-0", "1050-1"]
+        }
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(ng, f, indent=4)
+        print(f"[+] Saved NGlyph: {out_path}")
+    elif output_format == 'csv':
+        import csv
+        with open(out_path, "w", newline='', encoding="utf-8") as f:
+            writer = csv.writer(f)
+            # Write phone model
+            writer.writerow([f"PHONE_MODEL: {phone_model}"])
+            # Write header
+            header = [f"zone_{i}" for i in range(final.shape[1])]
+            writer.writerow(header)
+            # Write rows
+            for row in final:
+                writer.writerow(row)
+        print(f"[+] Saved CSV: {out_path}")
+    elif output_format == 'compact':
+        # .musicviz binary format:
+        # - Text header: "PHONE_MODEL: <model>\n"
+        # - Binary: uint32 n_frames, uint32 n_zones
+        # - Binary: n_frames * n_zones uint16 brightness values (0-4095)
+        # Very space efficient for storage.
+        with open(out_path, "wb") as f:
+            # Write header as text
+            header = f"PHONE_MODEL: {phone_model}\n"
+            f.write(header.encode('utf-8'))
+            # Write dimensions and binary data
+            n_frames, n_zones = final.shape
+            import struct
+            f.write(struct.pack('II', n_frames, n_zones))
+            final_bytes = final.astype(np.uint16).tobytes()
+            f.write(final_bytes)
+        print(f"[+] Saved Compact: {out_path}")
+    return out_path
 
 def run_glyphmodder_write(nglyph_path: str, ogg_path: str, title: Optional[str] = None, cwd: Optional[str] = None) -> str:
     if not isinstance(ogg_path, str) or not ogg_path:
@@ -557,8 +769,8 @@ class GlyphVisualizerAPI:
 
     def _process_audio(self, audio_path: str, conf: dict, out_path: str, output_format: str = 'nglyph') -> str:
         """
-        Process audio using the standard pipeline and write .nglyph.
-        This function avoids extra per-frame Python loops for postprocessing.
+        Process audio using the new pipeline.
+        This function uses the optimized frequency-based processing pipeline.
         """
         fps = 60
         phone_model = conf.get("phone_model")
@@ -567,17 +779,20 @@ class GlyphVisualizerAPI:
         amp_conf = conf.get("amp")
 
         samples, sr = load_audio_mono(audio_path)
-        raw, n_frames = compute_raw_matrix(samples, sr, zones, fps)
-
-        # Vectorized normalization + multiplier + decay pipeline
-        linear = normalize_to_quadratic(raw)  # float matrix
-        linear_scaled = apply_multiplier_only(linear, amp_conf)
-        try:
-            linear_scaled = apply_zone_percent_mapping(linear_scaled, zones, linear_max=4095.0)
-        except Exception as e:
-            print(f"[!] Warning: zone percent mapping failed in API: {e}")
-        decayed_linear = apply_decay_to_raw(linear_scaled, decay_alpha)
-        final = np.clip(np.round(decayed_linear), 0, 4095).astype(int)
+        
+        # NEW PIPELINE:
+        # 1. Extract unique frequencies from the preset
+        unique_freqs = extract_unique_frequencies(zones)
+        print(f"[+] Extracted {len(unique_freqs)} unique frequency range(s) from preset")
+        
+        # 2. Compute frequency analysis table (FFT only for selected frequencies, with multiplier and decay applied together)
+        freq_table, n_frames = compute_frequency_table(samples, sr, unique_freqs, fps, decay_alpha, amp_conf)
+        
+        # 3. Map analyzed frequencies to zones with percent conversion
+        linear_scaled = map_frequencies_to_zones(freq_table, unique_freqs, zones)
+        
+        # 4. Clip to 0-4095 brightness range
+        final = np.clip(np.round(linear_scaled), 0, 4095).astype(int)
 
         # --- write NGlyph
         author_rows = [",".join(map(str, row)) + "," for row in final]
@@ -587,9 +802,9 @@ class GlyphVisualizerAPI:
             "AUTHOR": author_rows,
             "CUSTOM1": ["1-0", "1050-1"]
         }
-        with open(out_nglyph_path, "w", encoding="utf-8") as f:
+        with open(out_path, "w", encoding="utf-8") as f:
             json.dump(ng, f, indent=4)
-        return out_nglyph_path
+        return out_path
 
     def generate_glyph_ogg(
         self,
