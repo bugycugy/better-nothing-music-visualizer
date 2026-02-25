@@ -256,11 +256,11 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            transition: 0.2s;
+            transition: 0.3s ease;
         }
 
         .preset-nav-button:hover {
-            background: #333;
+            background: #ff0000;
         }
 
         .preset-view.animate-left {
@@ -273,7 +273,7 @@
 
         @keyframes slideInLeft {
             from {
-                transform: translateX(20px);
+                transform: translateX(50px);
                 opacity: 0;
             }
 
@@ -285,7 +285,7 @@
 
         @keyframes slideInRight {
             from {
-                transform: translateX(-20px);
+                transform: translateX(-50px);
                 opacity: 0;
             }
 
@@ -790,15 +790,12 @@
         let logMessages = [];
 
         /**
-         * Log message to on-screen console
+         * Log message to on-screen console and terminal
          */
         function onScreenLog(message) {
             logMessages.push(message);
-            const statusEl = document.getElementById('statusMessage');
-            if (statusEl) {
-                statusEl.textContent = logMessages.slice(-5).join('\n');
-                statusEl.className = 'status-message show info';
-            }
+            // Add to terminal in real-time
+            addTerminalLog(message);
         }
 
         /**
@@ -825,13 +822,12 @@
         function populatePhoneSelect() {
             const hidden = document.getElementById('phoneKeyHidden');
             const container = document.getElementById('presetContainer');
-            const carousel = document.getElementById('presetCarousel');
             const view = document.getElementById('presetView');
             phonesList = visualizer.getAvailablePhones();
 
             if (!phonesList || phonesList.length === 0) {
                 view.textContent = 'No presets available';
-                carousel.style.display = 'none';
+                container.style.display = 'none';
                 return;
             }
 
@@ -847,7 +843,7 @@
                 // Update description element below carousel
                 const descEl = document.getElementById('presetDescription');
                 descEl.innerHTML = `
-                    <div class="preset-description-item"> This preset is basically ${info.description}</div>
+                    <div class="preset-description-item">This preset is basically ${info.description}</div>
                 `;
                 // remove previous animation classes
                 view.classList.remove('animate-left', 'animate-right');
@@ -878,6 +874,36 @@
                 currentPresetIndex = (currentPresetIndex - 1 + phonesList.length) % phonesList.length;
                 renderPreset('right');
             };
+            
+            // Setup carousel nav buttons after functions are ready
+            setupCarouselNav();
+        }
+        
+        /**
+         * Setup carousel navigation buttons
+         */
+        function setupCarouselNav() {
+            const presetPrev = document.getElementById('presetPrev');
+            const presetNext = document.getElementById('presetNext');
+            
+            // Remove old listeners if any
+            if (presetPrev) {
+                const newPrev = presetPrev.cloneNode(true);
+                presetPrev.parentNode.replaceChild(newPrev, presetPrev);
+                newPrev.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    if (window._prevPreset) window._prevPreset();
+                });
+            }
+            
+            if (presetNext) {
+                const newNext = presetNext.cloneNode(true);
+                presetNext.parentNode.replaceChild(newNext, presetNext);
+                newNext.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    if (window._nextPreset) window._nextPreset();
+                });
+            }
         }
 
         /**
@@ -935,20 +961,6 @@
                     helpModal.classList.remove('show');
                 }
             });
-
-            // Preset carousel nav
-            const presetPrev = document.getElementById('presetPrev');
-            const presetNext = document.getElementById('presetNext');
-            if (presetPrev && presetNext) {
-                presetPrev.addEventListener('click', () => {
-                    if (window._prevPreset) window._prevPreset();
-                    addTerminalLog(`Preset selected: ${document.getElementById('phoneKeyHidden').value}`);
-                });
-                presetNext.addEventListener('click', () => {
-                    if (window._nextPreset) window._nextPreset();
-                    addTerminalLog(`Preset selected: ${document.getElementById('phoneKeyHidden').value}`);
-                });
-            }
         }
 
         /**
@@ -1006,7 +1018,7 @@
         }
 
         /**
-         * Process the selected audio file
+         * Process the selected audio files
          */
         async function processAudio() {
             if ((!selectedFiles || selectedFiles.length === 0) || !visualizer) {
@@ -1015,6 +1027,7 @@
             }
 
             const phoneKey = document.getElementById('phoneKeyHidden').value;
+            const format = document.querySelector('input[name="outputFormat"]:checked').value;
             const button = document.getElementById('processButton');
             const progressSection = document.getElementById('progressSection');
 
@@ -1022,30 +1035,47 @@
             button.innerHTML = '<span class="spinner"></span>Processing...';
             progressSection.classList.add('show');
 
-            // Clear terminal and show it
             clearTerminal();
             showTerminal();
-            addTerminalLog(`Phone: ${phoneKey}`);
+            addTerminalLog(`🚀 Starting batch processing (${selectedFiles.length} file(s))`);
+            addTerminalLog(`📱 Format: ${format.toUpperCase()}`);
+            addTerminalLog('');
 
             try {
                 processedResults = [];
-                const totalFiles = selectedFiles.length;
-                for (let i = 0; i < totalFiles; i++) {
-                    const file = selectedFiles[i];
-                    addTerminalLog(`Starting processing for: ${file.name}`);
-                    addTerminalLog('Decoding audio file...');
-                    const result = await visualizer.processAudio(file, phoneKey, (progress) => {
-                        // augment progress with file index
-                        updateProgress({ ...progress, stage: `${file.name} — ${progress.stage}` });
-                        addTerminalLog(`${file.name} ${progress.stage}: ${progress.current}/${progress.total} (${progress.progress}%)`);
+                for (let fileIdx = 0; fileIdx < selectedFiles.length; fileIdx++) {
+                    const file = selectedFiles[fileIdx];
+                    addTerminalLog(`[${fileIdx + 1}/${selectedFiles.length}] Processing: ${file.name}`);
+                    
+                    // One-line processing: config + audio + preset → formatted export
+                    const exportData = await visualizer.processAndExport('../zones.config', file, phoneKey, format, (progress) => {
+                        // Update progress bar only (don't spam terminal with every callback)
+                        updateProgress({
+                            stage: progress.stage,
+                            progress: progress.progress,
+                            current: progress.current,
+                            total: progress.total
+                        });
                     });
-
-                    lastProcessResult = result;
-                    addTerminalLog(`Processing complete for ${file.name}!`);
-                    addTerminalLog(`Generated ${result.nFrames} frames with ${result.nFreqs} frequency bands`);
-                    addProcessedResult(result, file);
+                    
+                    const ext = format === 'csv' ? '.csv' : (format === 'compact' ? '.musicviz' : '.nglyph');
+                    const mimeType = format === 'csv' ? 'text/csv' : (format === 'compact' ? 'application/octet-stream' : 'application/json');
+                    const baseName = file.name.replace(/\.[^.]+$/, '');
+                    
+                    processedResults.push({
+                        originalFileName: file.name,
+                        files: [{
+                            fileName: baseName + ext,
+                            data: exportData,
+                            mimeType,
+                            isBlob: format === 'compact'
+                        }]
+                    });
+                    
+                    addTerminalLog('');
                 }
                 showStatus('All files processed successfully!', 'success');
+                renderDownloadFiles();
 
             } catch (error) {
                 addTerminalLog(`ERROR: ${error.message}`, 'error');
@@ -1063,33 +1093,9 @@
          */
         function updateProgress(progress) {
             const { stage, progress: percent, current, total } = progress;
-
             document.getElementById('progressStage').textContent = `${stage}: ${current}/${total}`;
             document.getElementById('progressFill').style.width = `${percent}%`;
             document.getElementById('progressInfo').textContent = `${percent}%`;
-        }
-
-        function addProcessedResult(result, originalFile) {
-            // compute export file according to selected format (single selection)
-            const format = document.querySelector('input[name="outputFormat"]:checked').value;
-            const exports = [];
-
-            if (format === 'nglyph') {
-                const data = visualizer.exportAsNGlyph(result);
-                exports.push({ extension: '.nglyph', data, mimeType: 'application/json' });
-            } else if (format === 'csv') {
-                const data = visualizer.exportAsCSV(result);
-                exports.push({ extension: '.csv', data, mimeType: 'text/csv' });
-            } else if (format === 'compact') {
-                const data = visualizer.exportAsCompact(result);
-                exports.push({ extension: '.musicviz', data, mimeType: 'application/octet-stream', isBlob: true });
-            }
-
-            const baseName = result.fileName.replace(/\.[^.]+$/, '');
-            const files = exports.map(e => ({ fileName: baseName + e.extension, data: e.data, mimeType: e.mimeType, isBlob: !!e.isBlob }));
-
-            processedResults.push({ originalFileName: originalFile.name, files });
-            renderDownloadFiles();
         }
 
         function renderDownloadFiles() {
@@ -1183,24 +1189,36 @@
         }
 
         /**
-         * Add a line to the terminal output
+         * Add a line to the terminal output with auto-flush
          */
         function addTerminalLog(message, type = 'log') {
             const terminal = document.getElementById('terminal');
             const line = document.createElement('div');
             line.className = 'terminal-line';
-
-            const time = new Date().toLocaleTimeString();
-
+            
+            // Color-code by type
+            let color = '#0f0'; // green default
+            let prefix = '';
             if (type === 'error') {
-                line.innerHTML = `<span class="terminal-time">[${time}]</span><span style="color: #ff0000;">✗ ${message}</span>`;
+                color = '#ff0000';
+                prefix = '✗ ';
             } else if (type === 'success') {
-                line.innerHTML = `<span class="terminal-time">[${time}]</span><span style="color: #4caf50;">✓ ${message}</span>`;
-            } else {
-                line.innerHTML = `<span class="terminal-time">[${time}]</span> ${message}`;
+                color = '#4caf50';
+                prefix = '✓ ';
             }
-
+            
+            line.innerHTML = `<span style="color: ${color};">${prefix}${message}</span>`;
             terminal.appendChild(line);
+            
+            // Auto-flush: keep last 100 lines only
+            const lines = terminal.querySelectorAll('.terminal-line');
+            if (lines.length > 100) {
+                for (let i = 0; i < lines.length - 100; i++) {
+                    lines[i].remove();
+                }
+            }
+            
+            // Auto-scroll to bottom
             terminal.scrollTop = terminal.scrollHeight;
         }
 
