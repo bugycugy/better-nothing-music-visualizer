@@ -14,7 +14,7 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #0a0a0a;
+            background: #000;
             min-height: 100vh;
             display: flex;
             align-items: center;
@@ -74,6 +74,8 @@
             display: grid;
             grid-template-columns: 1fr;
             gap: 8px;
+            max-width: 50vh;
+            margin: auto;
         }
 
         .preset-description-item {
@@ -401,25 +403,50 @@
 
         .process-button {
             background: #ff0000;
+            color: #fff;
+            border: 2px solid #ff4d4d;
+            border-radius: 8px;
+            padding: 10px 20px;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 5px 14px rgba(255, 0, 0, 0.3);
+        }
+
+        .process-button-wrap {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 108px;
+            padding: 14px 0;
+            overflow: visible;
+        }
+
+        #processButton {
+            background: #dd0000;
             color: white;
-            border: none;
-            padding: 16px 60px;
+            border: 3px solid #ff4d4d;
+            width: min(100%, 340px);
+            height: 64px;
+            padding: 0 26px;
             font-size: 1.1em;
             font-weight: 600;
-            border-radius: 6px;
+            line-height: 1;
+            border-radius: 10px;
             cursor: pointer;
-            transition: 0.2s;
-            box-shadow: 0 5px 20px rgba(255, 0, 0, 0.3);
+            transition: opacity 0.2s ease;
+            box-shadow: 0 8px 24px rgba(255, 0, 0, 0.4);
+            will-change: transform, box-shadow, border-radius, border-color, filter;
+            transform-origin: center center;
+            backface-visibility: hidden;
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
         }
 
-        .process-button:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 30px rgba(255, 0, 0, 0.4);
-        }
-
-        .process-button:disabled {
+        #processButton:disabled {
             opacity: 0.5;
             cursor: not-allowed;
+            filter: none;
         }
 
         .status-message {
@@ -664,7 +691,7 @@
                 padding: 20px;
             }
 
-            .process-button {
+            #processButton {
                 width: 100%;
             }
 
@@ -692,7 +719,8 @@
     <div class="container">
         <div class="header">
             <h1>Better Nothing Music Visualizer</h1>
-            <p>This webpage allows you to run my amazing script <strong>IN 3 FUCKING STEPS.</strong> (sorry if you don't like the word fuck)</p>
+            <p>This webpage allows you to run my amazing script <strong>IN 3 FUCKING STEPS.</strong> (sorry if you don't
+                like the word fuck)</p>
         </div>
 
         <!-- Steps: each step is a boxed panel; stacks on mobile, horizontal on desktop -->
@@ -702,7 +730,8 @@
                 <div class="drop-zone" id="dropZone">
                     <div id="uploadedFiles" style="display:flex; flex-direction:column; gap:8px;"></div>
                     <div class="drop-zone-text">Drop audio files here</div>
-                    <div class="drop-zone-subtext">or click to browse (MP3, OGG, WAV, M4A) Multiple files supported</div>
+                    <div class="drop-zone-subtext">or click to browse (MP3, OGG, WAV, M4A) Multiple files supported
+                    </div>
                     <input type="file" id="fileInput" class="file-input-hidden" accept="audio/*" multiple>
                 </div>
             </div>
@@ -753,10 +782,12 @@
 
             <div class="step-box" id="stepProcess">
                 <div class="section-title">Step 3: Click this fucking button</div>
-                <div style="text-align: center; margin-top: 6px;">
-                    <button class="process-button" id="processButton" disabled>
-                        Process Audio
-                    </button>
+                <div style="text-align: center;">
+                    <div class="process-button-wrap">
+                        <button class="process-button" id="processButton" disabled>
+                            Click me please I want to process the audio files you gave me!
+                        </button>
+                    </div>
                     <div id="statusMessage" class="status-message"></div>
                 </div>
                 <!-- Download Section -->
@@ -788,6 +819,9 @@
         let phonesList = [];
         let currentPresetIndex = 0;
         let logMessages = [];
+        let processButtonAnimFrame = null;
+        let processButtonHoverLocked = false;
+        let processButtonAnimStart = 0;
 
         /**
          * Log message to on-screen console and terminal
@@ -839,7 +873,7 @@
                 const key = phonesList[currentPresetIndex];
                 const info = visualizer.getPhoneInfo(key);
                 const content = `<div class="preset-item selected"><div class="title">${key}</div><div class="meta">${info.zone_count} zones</div></div>`;
-                
+
                 // Update description element below carousel
                 const descEl = document.getElementById('presetDescription');
                 descEl.innerHTML = `
@@ -874,18 +908,18 @@
                 currentPresetIndex = (currentPresetIndex - 1 + phonesList.length) % phonesList.length;
                 renderPreset('right');
             };
-            
+
             // Setup carousel nav buttons after functions are ready
             setupCarouselNav();
         }
-        
+
         /**
          * Setup carousel navigation buttons
          */
         function setupCarouselNav() {
             const presetPrev = document.getElementById('presetPrev');
             const presetNext = document.getElementById('presetNext');
-            
+
             // Remove old listeners if any
             if (presetPrev) {
                 const newPrev = presetPrev.cloneNode(true);
@@ -895,7 +929,7 @@
                     if (window._prevPreset) window._prevPreset();
                 });
             }
-            
+
             if (presetNext) {
                 const newNext = presetNext.cloneNode(true);
                 presetNext.parentNode.replaceChild(newNext, presetNext);
@@ -904,6 +938,67 @@
                     if (window._nextPreset) window._nextPreset();
                 });
             }
+        }
+
+        function paintProcessButtonNeutral(button) {
+            button.style.transform = 'translateZ(0) scale(1, 1)';
+            button.style.borderRadius = '10px';
+            button.style.borderColor = '#ff4d4d';
+            button.style.filter = 'none';
+            button.style.boxShadow = '0 8px 24px rgba(255, 0, 0, 0.4)';
+        }
+
+        function paintProcessButtonHoverLock(button) {
+            button.style.transition = '.5s ease';
+            button.style.transform = 'translateZ(0) scale(1.08, 1.5)';
+            button.style.borderRadius = '16px';
+            button.style.borderColor = '#ffffff';
+            button.style.filter = 'saturate(1.22) brightness(1.1)';
+            button.style.boxShadow = '0 16px 42px rgba(255, 0, 0, 0.72), 0 0 36px rgba(255, 95, 95, 0.86)';
+        }
+
+        function startProcessButtonAnimation(button) {
+            if (processButtonAnimFrame !== null) return;
+            processButtonAnimStart = performance.now();
+
+            const frame = (now) => {
+                if (!button || !button.isConnected) {
+                    processButtonAnimFrame = null;
+                    return;
+                }
+
+                if (button.disabled) {
+                    paintProcessButtonNeutral(button);
+                } else if (processButtonHoverLocked) {
+                    paintProcessButtonHoverLock(button);
+                } else {
+                    button.style.transition = '.15s';
+                    const t = (now - processButtonAnimStart) / 1000;
+                    const waveA = Math.sin(t * 2.3);
+                    const waveB = Math.sin(t * 3.7 + 1.2);
+                    const waveC = Math.sin(t * 5 + 0.4);
+
+                    const scaleX = 1 + waveB * 0.275;
+                    const scaleY = 1 + waveA * 0.245;
+                    const rotate = waveC * 10;
+                    const radius = 5 + (waveC + 1) * 20
+
+                    const borderG = Math.round(70 + (waveA + 1) * 72);
+
+                    const shadowY = 8 + (waveB + 1) * 6;
+                    const shadowBlur = 22 + (waveA + 1) * 13;
+                    const auraBlur = 16 + (waveC + 1) * 12;
+
+                    button.style.transform = `translateZ(0) scale(${scaleX.toFixed(3)}, ${scaleY.toFixed(3)}) rotate(${rotate.toFixed(2)}deg)`;
+                    button.style.borderRadius = `${radius.toFixed(1)}px`;
+                    button.style.borderColor = `rgb(255, ${borderG}, 0)`;
+                    button.style.boxShadow = `0 ${shadowY.toFixed(1)}px ${shadowBlur.toFixed(1)}px rgba(255, 0, 0, 0.62), 0 0 ${auraBlur.toFixed(1)}px rgba(255, 110, 110, 0.72)`;
+                }
+
+                processButtonAnimFrame = requestAnimationFrame(frame);
+            };
+
+            processButtonAnimFrame = requestAnimationFrame(frame);
         }
 
         /**
@@ -941,6 +1036,11 @@
 
             // Process button
             processButton.addEventListener('click', processAudio);
+            processButton.addEventListener('mouseenter', () => { processButtonHoverLocked = true; });
+            processButton.addEventListener('mouseleave', () => { processButtonHoverLocked = false; });
+            processButton.addEventListener('focus', () => { processButtonHoverLocked = true; });
+            processButton.addEventListener('blur', () => { processButtonHoverLocked = false; });
+            startProcessButtonAnimation(processButton);
 
             // Help modal
             helpButton.addEventListener('click', () => {
@@ -1046,7 +1146,7 @@
                 for (let fileIdx = 0; fileIdx < selectedFiles.length; fileIdx++) {
                     const file = selectedFiles[fileIdx];
                     addTerminalLog(`[${fileIdx + 1}/${selectedFiles.length}] Processing: ${file.name}`);
-                    
+
                     // One-line processing: config + audio + preset → formatted export
                     const exportData = await visualizer.processAndExport('../zones.config', file, phoneKey, format, (progress) => {
                         // Update progress bar only (don't spam terminal with every callback)
@@ -1057,11 +1157,11 @@
                             total: progress.total
                         });
                     });
-                    
+
                     const ext = format === 'csv' ? '.csv' : (format === 'compact' ? '.musicviz' : '.nglyph');
                     const mimeType = format === 'csv' ? 'text/csv' : (format === 'compact' ? 'application/octet-stream' : 'application/json');
                     const baseName = file.name.replace(/\.[^.]+$/, '');
-                    
+
                     processedResults.push({
                         originalFileName: file.name,
                         files: [{
@@ -1071,7 +1171,7 @@
                             isBlob: format === 'compact'
                         }]
                     });
-                    
+
                     addTerminalLog('');
                 }
                 showStatus('All files processed successfully!', 'success');
@@ -1195,7 +1295,7 @@
             const terminal = document.getElementById('terminal');
             const line = document.createElement('div');
             line.className = 'terminal-line';
-            
+
             // Color-code by type
             let color = '#0f0'; // green default
             let prefix = '';
@@ -1206,10 +1306,10 @@
                 color = '#4caf50';
                 prefix = '✓ ';
             }
-            
+
             line.innerHTML = `<span style="color: ${color};">${prefix}${message}</span>`;
             terminal.appendChild(line);
-            
+
             // Auto-flush: keep last 100 lines only
             const lines = terminal.querySelectorAll('.terminal-line');
             if (lines.length > 100) {
@@ -1217,7 +1317,7 @@
                     lines[i].remove();
                 }
             }
-            
+
             // Auto-scroll to bottom
             terminal.scrollTop = terminal.scrollHeight;
         }
