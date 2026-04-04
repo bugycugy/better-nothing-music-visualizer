@@ -75,6 +75,10 @@ You can:
 - Create new presets
 - Disscuss with the developpers
 
+##  <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f512/512.gif" alt="🔒" width="25" height="25"> Security
+**The link to the VirusTotal scan can be found here:**  
+https://www.virustotal.com/gui/url/c92c1ff82b56eb60bfd1e159592d09f949f0ea2d195e01f7f5adbef0e0b0385b?nocache=1
+
 ### <img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Symbols/Copyright.png" alt="Copyright" width="25" height="25" /> Credits:
 Here are the people involved in this project:
 - [Aleks-Levet](https://github.com/Aleks-Levet) (founder and coordinator, main idea, owner)
