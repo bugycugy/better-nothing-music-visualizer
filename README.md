@@ -20,6 +20,19 @@ Even if it technically isn’t, the visual response to music just isn’t very o
 
 ### See the difference in action! [**Click here to easily browse our video demos!**](https://github.com/Aleks-Levet/better-nothing-music-visualizer/blob/main/Demo-video-examples.md)
 
+## 📲 Supported Nothing Phone Models
+Currently these models are supported:
+- Nothing phone (1)
+- Nothing phone (2)
+- Nothing phone (2a)
+- Nothing phone (2a plus)
+- Nothing phone (3)
+- Nothing phone (3a)
+- Nothing phone (3a pro)
+- *Nothing phone (3)* **(beta, not good yet)**
+**Coming soon:**
+- *Nothing Phone (4a)*
+- *Nothing Phone (4a pro)*
 
 ## <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/2049_fe0f/512.gif" alt="⁉" width="32" height="32"> What does this do ?
 `musicViz.py` takes an audio file (such as `.mp3`, `.m4a`, or `.ogg`), generates a `.nglyph` file containing the Glyph animations, then runs the generated file through [*SebiAi’s GlyphModder*](https://github.com/SebiAi/custom-nothing-glyph-tools/) to create a **better music visualisation on Nothing phones**!
@@ -49,18 +62,6 @@ We are also working on a potential **Music Player App** that can easily run the 
 - Switch between multiple music visualisation presets with 2 taps
 - fully offline (on device processing)
 - Intuitive
-
-## 📲 Supported Nothing Phone Models
-Currently these models are supported:
-- Nothing phone (1)
-- Nothing phone (2a)
-- Nothing phone (2a plus)
-- Nothing phone (3)
-- Nothing phone (3a)
-- Nothing phone (3a pro)
-- *Nothing phone (3)* **(beta)**
-**Coming soon:**
-- *Nothing phone (2)*
 
 ## <img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Hand%20gestures/Handshake.png" alt="Handshake" width="25" height="25" /> Join our community
 You want to talk or discuss? Bugs, feature requests? [Feel free to jump in and join us in the official discord thread in the Nothing server!](https://discord.com/channels/930878214237200394/1434923843239280743)
