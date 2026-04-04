@@ -30,6 +30,7 @@ Currently these models are supported:
 - Nothing phone (3a)
 - Nothing phone (3a pro)
 - *Nothing phone (3)* **(beta, not good yet)**
+  
 **Coming soon:**
 - *Nothing Phone (4a)*
 - *Nothing Phone (4a pro)*
