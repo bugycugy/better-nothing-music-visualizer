@@ -75,7 +75,7 @@ You can:
 - Create new presets
 - Disscuss with the developpers
 
-### Credits:
+### <img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Symbols/Copyright.png" alt="Copyright" width="25" height="25" /> Credits:
 Here are the people involved in this project:
 - [Aleks-Levet](https://github.com/Aleks-Levet) (founder and coordinator, main idea, owner)
 - [Nicouschulas](https://github.com/Nicouschulas) (Readme & Wiki enhancements)
