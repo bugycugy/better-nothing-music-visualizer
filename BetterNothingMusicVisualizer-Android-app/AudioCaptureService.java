@@ -55,14 +55,13 @@ import java.util.concurrent.Executors;
  * Real-time Nothing glyph visualizer driven by zones.config.
  *
  * The Java port now follows the same high-level pipeline as musicViz.py:
- *   FFT -> unique frequency peaks -> overlapping zone mapping ->
- *   quadratic normalization -> optional percent slice mapping -> glyph output
+ *   FFT -> unique frequency peaks -> per-frequency decay ->
+ *   overlapping zone mapping -> quadratic normalization ->
+ *   optional percent slice mapping -> glyph output
  *
- * In real time we cannot know the future max of the song, so normalization uses
- * a rolling per-zone peak while decay is applied from the current light state.
- * That makes each frame depend on the two inputs you asked for:
- *   1. the current FFT peaks
- *   2. the current light state (used as the decay source)
+ * The only intentional runtime difference is normalization: the Python script
+ * can normalize against the whole track, while the live service uses a rolling
+ * per-zone peak because future frames are not known yet.
  */
 public class AudioCaptureService extends Service {
 
@@ -81,12 +80,14 @@ public class AudioCaptureService extends Service {
 
     private static final int SAMPLE_RATE = 44100;
     private static final int FPS = 60;
-    private static final int HOP = SAMPLE_RATE / FPS;
-    private static final int WIN = 2048;
-    private static final float HZ_PER_BIN = (float) SAMPLE_RATE / WIN;
+    private static final int HOP = Math.round(SAMPLE_RATE / (float) FPS);
+    private static final int ANALYSIS_WINDOW = roundHalfEvenToInt(SAMPLE_RATE * 0.025d);
+    private static final int FFT_SIZE = nextPowerOfTwo(ANALYSIS_WINDOW);
+    private static final float HZ_PER_BIN = (float) SAMPLE_RATE / FFT_SIZE;
 
     private static final float THRESHOLD = 0.06f;
     private static final float PEAK_FALLOFF = 0.9995f;
+    private static final float PYTHON_FREQ_MULTIPLIER = 4f;
     private static final float EPSILON = 0.000001f;
     private static final long MIN_SEND_MS = 16L;
 
@@ -108,6 +109,7 @@ public class AudioCaptureService extends Service {
 
     private float[] mCurrentLightState = new float[0];
     private float[] mZonePeaks = new float[0];
+    private float[] mDecayedFrequencyState = new float[0];
     private int mLastHash = -999;
     private long mLastSendMs = 0L;
 
@@ -177,7 +179,7 @@ public class AudioCaptureService extends Service {
             this.lowHz = lowHz;
             this.highHz = highHz;
             this.binLo = Math.max(0, (int) Math.ceil(lowHz / HZ_PER_BIN));
-            this.binHi = Math.max(binLo, Math.min(WIN / 2, (int) Math.floor(highHz / HZ_PER_BIN)));
+            this.binHi = Math.max(binLo, Math.min(FFT_SIZE / 2, (int) Math.floor(highHz / HZ_PER_BIN)));
         }
     }
 
@@ -314,20 +316,23 @@ public class AudioCaptureService extends Service {
     public void stopCapture() {
         mCapturing = false;
         if (mAudioRecord != null) {
+            AudioRecord audioRecord = mAudioRecord;
+            mAudioRecord = null;
             try {
-                mAudioRecord.stop();
+                audioRecord.stop();
             } catch (Exception ignored) {
             }
-            mAudioRecord.release();
-            mAudioRecord = null;
+            audioRecord.release();
         }
         if (mProjection != null) {
-            mProjection.stop();
+            MediaProjection projection = mProjection;
             mProjection = null;
+            projection.stop();
         }
         if (mExecutor != null) {
-            mExecutor.shutdownNow();
+            ExecutorService executor = mExecutor;
             mExecutor = null;
+            executor.shutdownNow();
         }
         resetVisualizerState();
         mHandler.post(() -> {
@@ -368,7 +373,7 @@ public class AudioCaptureService extends Service {
                         .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
                         .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                         .build())
-                .setBufferSizeInBytes(Math.max(minBuf, WIN * 4))
+                .setBufferSizeInBytes(Math.max(minBuf, FFT_SIZE * 4))
                 .build();
 
         if (mAudioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
@@ -381,12 +386,12 @@ public class AudioCaptureService extends Service {
         mCapturing = true;
         Log.d(TAG, "Capture started using " + config.presetKey + " with " + config.zones.length + " zones");
 
-        float[] hann = buildHannWindow(WIN);
-        float[] ring = new float[WIN];
+        float[] hann = buildHannWindow(ANALYSIS_WINDOW);
+        float[] ring = new float[ANALYSIS_WINDOW];
         short[] hop = new short[HOP];
-        float[] re = new float[WIN];
-        float[] im = new float[WIN];
-        float[] mag = new float[(WIN / 2) + 1];
+        float[] re = new float[FFT_SIZE];
+        float[] im = new float[FFT_SIZE];
+        float[] mag = new float[(FFT_SIZE / 2) + 1];
         int rPos = 0;
         int filled = 0;
 
@@ -398,20 +403,21 @@ public class AudioCaptureService extends Service {
 
             for (int i = 0; i < read; i++) {
                 ring[rPos] = hop[i] / 32768f;
-                rPos = (rPos + 1) % WIN;
+                rPos = (rPos + 1) % ANALYSIS_WINDOW;
             }
-            filled = Math.min(filled + read, WIN);
-            if (filled < WIN) {
+            filled = Math.min(filled + read, ANALYSIS_WINDOW);
+            if (filled < ANALYSIS_WINDOW) {
                 continue;
             }
 
-            for (int i = 0; i < WIN; i++) {
-                re[i] = ring[(rPos + i) % WIN] * hann[i];
-                im[i] = 0f;
+            Arrays.fill(re, 0f);
+            Arrays.fill(im, 0f);
+            for (int i = 0; i < ANALYSIS_WINDOW; i++) {
+                re[i] = ring[(rPos + i) % ANALYSIS_WINDOW] * hann[i];
             }
-            fft(re, im, WIN);
+            fft(re, im, FFT_SIZE);
 
-            for (int k = 0; k <= WIN / 2; k++) {
+            for (int k = 0; k <= FFT_SIZE / 2; k++) {
                 mag[k] = (float) Math.sqrt((re[k] * re[k]) + (im[k] * im[k]));
             }
 
@@ -428,13 +434,12 @@ public class AudioCaptureService extends Service {
             }
 
             final float[] peaksForFrame = uniquePeaks;
-            mHandler.post(() -> processFrame(peaksForFrame));
+            mHandler.post(() -> processFrame(peaksForFrame, config));
         }
         Log.d(TAG, "Loop ended");
     }
 
-    private void processFrame(float[] uniquePeaks) {
-        VisualizerConfig config = mVisualizerConfig;
+    private void processFrame(float[] uniquePeaks, VisualizerConfig config) {
         if (!mSessionOpen || mGM == null || config == null) {
             return;
         }
@@ -445,10 +450,24 @@ public class AudioCaptureService extends Service {
         }
         mLastSendMs = now;
 
-        ensureStateArrays(config.zones.length);
+        ensureStateArrays(config.zones.length, config.uniqueRanges.length);
 
-        float[] nextLightState = computeNextLightState(uniquePeaks, mCurrentLightState, config);
+        float[] nextLightState = computeNextLightState(uniquePeaks, config);
         System.arraycopy(nextLightState, 0, mCurrentLightState, 0, nextLightState.length);
+
+        int[] frameColors = buildFrameColors(nextLightState, config.zones.length);
+        int hash = Arrays.hashCode(frameColors);
+        if (hash == mLastHash) {
+            return;
+        }
+        mLastHash = hash;
+
+        try {
+            mGM.setFrameColors(frameColors); //this is the way to have proper smooth brightness levels.
+            return;
+        } catch (Exception e) {
+            Log.w(TAG, "setFrameColors failed, falling back to channel toggles", e);
+        }
 
         ArrayList<Integer> activeChannels = new ArrayList<>();
         for (int zoneIndex = 0; zoneIndex < nextLightState.length; zoneIndex++) {
@@ -456,12 +475,6 @@ public class AudioCaptureService extends Service {
                 activeChannels.add(zoneIndex);
             }
         }
-
-        int hash = activeChannels.hashCode();
-        if (hash == mLastHash) {
-            return;
-        }
-        mLastHash = hash;
 
         try {
             if (activeChannels.isEmpty()) {
@@ -479,19 +492,25 @@ public class AudioCaptureService extends Service {
         }
     }
 
-    private float[] computeNextLightState(
-            float[] uniquePeaks,
-            float[] currentLightState,
-            VisualizerConfig config
-    ) {
+    private int[] buildFrameColors(float[] normalizedLightState, int expectedLength) {
+        int[] frameColors = new int[expectedLength];
+        int count = Math.min(normalizedLightState.length, expectedLength);
+        for (int i = 0; i < count; i++) {
+            frameColors[i] = Math.round(clamp01(normalizedLightState[i]) * 4095f);
+        }
+        return frameColors;
+    }
+
+    private float[] computeNextLightState(float[] uniquePeaks, VisualizerConfig config) {
+        float[] decayedFrequencyState = computeDecayedFrequencyState(uniquePeaks, config);
         float[] nextState = new float[config.zones.length];
 
         for (int zoneIndex = 0; zoneIndex < config.zones.length; zoneIndex++) {
             float rawZonePeak = 0f;
             int[] overlappingRanges = config.zoneToRangeIndices[zoneIndex];
             for (int rangeIndex : overlappingRanges) {
-                if (rangeIndex >= 0 && rangeIndex < uniquePeaks.length) {
-                    rawZonePeak = Math.max(rawZonePeak, uniquePeaks[rangeIndex]);
+                if (rangeIndex >= 0 && rangeIndex < decayedFrequencyState.length) {
+                    rawZonePeak = Math.max(rawZonePeak, decayedFrequencyState[rangeIndex]);
                 }
             }
 
@@ -503,23 +522,34 @@ public class AudioCaptureService extends Service {
             float normalized = clamp01(rawZonePeak / mZonePeaks[zoneIndex]);
             float quadratic = normalized * normalized;
             float mapped = applyPercentSlice(quadratic, config.zones[zoneIndex]);
-
-            float previousLight = currentLightState[zoneIndex];
-            float risingEdge = Math.max(previousLight, mapped);
-            float decayed = (config.decay * risingEdge) + ((1f - config.decay) * mapped);
-            nextState[zoneIndex] = decayed < EPSILON ? 0f : clamp01(decayed);
+            nextState[zoneIndex] = mapped < EPSILON ? 0f : clamp01(mapped);
         }
 
         return nextState;
     }
 
-    private void ensureStateArrays(int zoneCount) {
-        if (mCurrentLightState.length == zoneCount && mZonePeaks.length == zoneCount) {
+    private float[] computeDecayedFrequencyState(float[] uniquePeaks, VisualizerConfig config) {
+        float[] next = new float[mDecayedFrequencyState.length];
+        for (int i = 0; i < next.length; i++) {
+            float current = (i < uniquePeaks.length ? uniquePeaks[i] : 0f) * PYTHON_FREQ_MULTIPLIER;
+            float risen = Math.max(mDecayedFrequencyState[i], current);
+            float decayed = (config.decay * risen) + ((1f - config.decay) * current);
+            next[i] = decayed < EPSILON ? 0f : decayed;
+        }
+        System.arraycopy(next, 0, mDecayedFrequencyState, 0, next.length);
+        return next;
+    }
+
+    private void ensureStateArrays(int zoneCount, int uniqueRangeCount) {
+        if (mCurrentLightState.length == zoneCount
+                && mZonePeaks.length == zoneCount
+                && mDecayedFrequencyState.length == uniqueRangeCount) {
             return;
         }
         mCurrentLightState = new float[zoneCount];
         mZonePeaks = new float[zoneCount];
         Arrays.fill(mZonePeaks, EPSILON);
+        mDecayedFrequencyState = new float[uniqueRangeCount];
         mLastHash = -999;
     }
 
@@ -527,10 +557,12 @@ public class AudioCaptureService extends Service {
         if (mVisualizerConfig == null) {
             mCurrentLightState = new float[0];
             mZonePeaks = new float[0];
+            mDecayedFrequencyState = new float[0];
         } else {
             mCurrentLightState = new float[mVisualizerConfig.zones.length];
             mZonePeaks = new float[mVisualizerConfig.zones.length];
             Arrays.fill(mZonePeaks, EPSILON);
+            mDecayedFrequencyState = new float[mVisualizerConfig.uniqueRanges.length];
         }
         mLastHash = -999;
         mLastSendMs = 0L;
@@ -745,9 +777,21 @@ public class AudioCaptureService extends Service {
     private static float[] buildHannWindow(int size) {
         float[] hann = new float[size];
         for (int i = 0; i < size; i++) {
-            hann[i] = 0.5f * (1f - (float) Math.cos((2d * Math.PI * i) / (size - 1)));
+            hann[i] = 0.5f * (1f - (float) Math.cos((2d * Math.PI * i) / size));
         }
         return hann;
+    }
+
+    private static int roundHalfEvenToInt(double value) {
+        return (int) Math.rint(value);
+    }
+
+    private static int nextPowerOfTwo(int value) {
+        int power = 1;
+        while (power < value) {
+            power <<= 1;
+        }
+        return power;
     }
 
     private static float clamp(float value, float min, float max) {
