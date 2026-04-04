@@ -1,6 +1,6 @@
 # <img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Travel%20and%20places/Fire.png" alt="Fire" width="35" height="35" />Better Nothing Music Visualizer
 
-## Importatnt Announcement
+## <img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Objects/Loudspeaker.png" alt="Loudspeaker" width="25" height="25" /> Importatnt Announcement
 I'm currently working with a developer to make an app, a special app that grabs the live audio stream from the android device and directly processes it into the glyphs. It will use the media projection feature, which sounds like a scary permission, but that's the only way to grab a high-quality audio stream from every app. that also means that you'll be able to visualize music playing through spotify, youtube music, and basically any music app you want, which means you don't have to manually process each file or only use local files! So yeah, we're moving from the simple Python script to a nice android app, so it will be way easier to use our algorithm!  
 
 ## <img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Smilies/Thinking%20Face.png" alt="Thinking Face" width="25" height="25" /> Why does this exist?
@@ -65,10 +65,6 @@ Currently these models are supported:
 ## <img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Hand%20gestures/Handshake.png" alt="Handshake" width="25" height="25" /> Join our community
 You want to talk or discuss? Bugs, feature requests? [Feel free to jump in and join us in the official discord thread in the Nothing server!](https://discord.com/channels/930878214237200394/1434923843239280743)
 
-##  <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f512/512.gif" alt="🔒" width="25" height="25"> Security
-**The link to the VirusTotal scan can be found here:**  
-https://www.virustotal.com/gui/url/c92c1ff82b56eb60bfd1e159592d09f949f0ea2d195e01f7f5adbef0e0b0385b?nocache=1
-
 ## 🏗️ Contributing
 Come and help us! Contributions are very welcome!
 You can:
@@ -79,7 +75,11 @@ You can:
 - Create new presets
 - Disscuss with the developpers
 
-### Credits:
+##  <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f512/512.gif" alt="🔒" width="25" height="25"> Security
+**The link to the VirusTotal scan can be found here:**  
+https://www.virustotal.com/gui/url/c92c1ff82b56eb60bfd1e159592d09f949f0ea2d195e01f7f5adbef0e0b0385b?nocache=1
+
+### <img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Symbols/Copyright.png" alt="Copyright" width="25" height="25" /> Credits:
 Here are the people involved in this project:
 - [Aleks-Levet](https://github.com/Aleks-Levet) (founder and coordinator, main idea, owner)
 - [Nicouschulas](https://github.com/Nicouschulas) (Readme & Wiki enhancements)
