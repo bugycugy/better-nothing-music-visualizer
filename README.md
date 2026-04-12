@@ -85,7 +85,7 @@ https://www.virustotal.com/gui/url/c92c1ff82b56eb60bfd1e159592d09f949f0ea2d195e0
 #### Here are the people involved in this project:
 - [Aleks-Levet](https://github.com/Aleks-Levet) (founder and coordinator, main idea, owner)
 - [Nicouschulas](https://github.com/Nicouschulas) (Readme & Wiki enhancements)
-- {Insert link of the dev helping me make the realtime app}
+- [rKyzen(a.k.a Shivank Dan)](https://github.com/rKyzen)(Android App developer with real time music stream)
 - [SebiAi](https://github.com/SebiAi) (Glyphmodder and glyph related help)
 - [Earnedel-lab](https://github.com/Earendel-lab) (Readme enhancements)
 - [あけ なるかみ](https://github.com/Luke20YT) (Dev making a Music app with an integration with this script)
