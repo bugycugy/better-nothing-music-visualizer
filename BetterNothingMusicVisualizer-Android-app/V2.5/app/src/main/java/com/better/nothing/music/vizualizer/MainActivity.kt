@@ -457,14 +457,13 @@ private fun AudioScreen(
     ) {
         ScreenTitle(text = "Better Nothing\nMusic Visualizer")
         BodyText(
-            text = "So this is where we explain why the app needs the media projection permission. " +
-                    "It does not record your screen, it only captures the audio output so the " +
-                    "Glyph animation can react in real time."
+            text = "To synchronize the Glyph Interface with your music, this app needs to capture process the device’s real-time audio output. We use the Media Projection API to ensure a high-fidelity audio capture for the best visualization.\n\n" +
+                    "Privacy Note: Don't be scared, we only utilize the audio stream. This app does not record or even view your screen content. Because we bypass video processing entirely, the app remains lightweight and avoids the battery drain associated with traditional screen recording."
         )
         AnimatedVisibility(visible = isRunning) {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 BodyText(
-                    text = "This latency compensation slider is for when you're using Bluetooth speakers for example."
+                    text = "This latency compensation slider is for when you're using Bluetooth audio devices for example."
                 )
                 LatencyCard(
                     latencyMs = latencyMs,
@@ -513,8 +512,8 @@ private fun GlyphsScreen(
         ) {
             GammaPreviewCard(gammaValue = gammaValue)
             BodyText(
-                text = "Text explaining what the gamma value does. More means brighter overall " +
-                        "with less subtle detail, less is flatter and less punchy.",
+                text = "A higher gamma value gives a more punchy look, but with less subtle details and overall brightness. " +
+                        "A lower one is brighter but less punchy.",
                 modifier = Modifier.weight(1f),
                 size = 14.sp,
                 lineHeight = 22.sp,
@@ -634,7 +633,7 @@ private fun LatencyCard(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(
@@ -667,7 +666,7 @@ private fun LatencyCard(
                                 containerColor = Color(0xFF403F44),
                                 contentColor = Color(0xFFE6E0EB)
                             ),
-                            contentPadding = PaddingValues(8.dp),
+                            contentPadding = PaddingValues(4.dp),
                         ) {
                             Text("Edit", style = MaterialTheme.typography.labelSmall)
                         }
@@ -737,8 +736,8 @@ private fun GammaCard(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(17.dp),
         ) {
             Text(
                 text = gammaLabel,
@@ -750,7 +749,7 @@ private fun GammaCard(
                 modifier = Modifier.fillMaxWidth(),
                 value = gammaValue,
                 onValueChange = onGammaChanged,
-                valueRange = 0.4f..3.0f,
+                valueRange = 0.4f..3.5f,
             )
         }
     }
@@ -804,7 +803,7 @@ private fun GammaPreviewCard(gammaValue: Float) {
             // Reuse path — reset instead of reallocating
             curvePath.reset()
             curvePath.moveTo(left, bottom)
-            val steps = 64
+            val steps = 20
             for (step in 1..steps) {
                 val x = step / steps.toFloat()
                 val y = x.pow(animatedGamma)
@@ -851,13 +850,10 @@ private fun StartStopButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // ── FIX 6: Share a single InteractionSource and derive both animations
-    //    from it.  Previously the scale spring and the two color tweens were
-    //    all independent state subscriptions, causing multiple simultaneous
-    //    recompositions on every press event.
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
+    // Animation: Scale on press
     val scale by animateFloatAsState(
         targetValue = if (isPressed) 0.9f else 1f,
         animationSpec = spring(
@@ -867,31 +863,35 @@ private fun StartStopButton(
         label = "buttonScale"
     )
 
+    // Animation: Color shift with 600ms easing
     val containerColor by animateColorAsState(
         targetValue = if (running) Color(0xFFE53935) else Color(0xFFB5F2B6),
-        animationSpec = tween(400, easing = EaseInOutCubic),
+        animationSpec = tween(600, easing = EaseInOutCubic),
         label = "containerColor"
     )
 
     val contentColor by animateColorAsState(
         targetValue = if (running) Color.White else Color(0xFF1C5A21),
-        // ── FIX 7: Give the content-color tween the same duration so both
-        //    colors finish together, avoiding a partial-color flicker frame.
-        animationSpec = tween(400, easing = EaseInOutCubic),
+        animationSpec = tween(600, easing = EaseInOutCubic),
         label = "contentColor"
     )
 
     FloatingActionButton(
         onClick = onClick,
         interactionSource = interactionSource,
+        // SPEC: 16dp corner radius
+        shape = RoundedCornerShape(16.dp),
         modifier = modifier
             .graphicsLayer(scaleX = scale, scaleY = scale)
-            .padding(10.dp),
+            // SPEC: Height 56dp, Min-Width 80dp
+            .height(56.dp)
+            .padding(5.dp),
         containerColor = containerColor,
         contentColor = contentColor,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp),
+            // SPEC: 16dp horizontal padding inside the container
+            modifier = Modifier.padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -903,15 +903,20 @@ private fun StartStopButton(
                 label = "iconTransition"
             ) { isRunning ->
                 Icon(
-                    imageVector = if (isRunning) Icons.Default.Stop else Icons.Filled.PlayArrow,
+                    // M3E Icons
+                    imageVector = if (isRunning) Icons.Filled.Stop else Icons.Filled.PlayArrow,
                     contentDescription = null,
-                    modifier = Modifier.size(32.dp)
+                    // SPEC: 24dp icon size
+                    modifier = Modifier.size(24.dp)
                 )
             }
             Text(
                 text = if (running) "Stop visualizer" else "Start visualizer",
-                style = MaterialTheme.typography.labelLarge,
-                letterSpacing = 1.sp
+                // Gmail uses Medium weight for the label
+                style = MaterialTheme.typography.labelLarge.copy(
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.5.sp
+                )
             )
         }
     }
@@ -942,7 +947,7 @@ private fun NativeBottomBar(
                     Icon(
                         imageVector = when (tab) {
                             Tab.Audio -> Icons.AutoMirrored.Filled.VolumeUp
-                            Tab.Glyphs -> Icons.Filled.Settings // Or Icons.Filled.Grain
+                            Tab.Glyphs -> Icons.Filled.Settings // replace with glyph icon soon pls
                             Tab.About -> Icons.Filled.Info
                         },
                         contentDescription = tab.label
