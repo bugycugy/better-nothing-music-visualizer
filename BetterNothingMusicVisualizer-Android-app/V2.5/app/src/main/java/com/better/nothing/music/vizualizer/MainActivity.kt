@@ -3,7 +3,6 @@ package com.better.nothing.music.vizualizer
 import android.Manifest
 import android.app.Activity
 import android.content.ComponentName
-import android.content.res.ColorStateList
 import android.content.Intent
 import android.content.ServiceConnection
 import android.media.projection.MediaProjectionManager
@@ -11,26 +10,33 @@ import android.os.Bundle
 import android.os.IBinder
 import android.service.quicksettings.TileService
 import android.util.Log
-import android.view.Menu
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.core.EaseOut
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.EaseInOutCubic
+import androidx.compose.animation.core.EaseOut
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.EaseInOutCubic
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -39,7 +45,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -48,59 +53,70 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.Stop
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.animation.togetherWith
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import kotlin.math.pow
-import com.google.android.material.bottomnavigation.BottomNavigationView
-import com.google.android.material.navigation.NavigationBarView
-import java.util.Locale
 
+
+// ─── Stable wrappers ─────────────────────────────────────────────────────────
+// Marking these @Stable tells the Compose compiler that equality checks are
+// reliable, so child composables that receive them as parameters are skipped
+// during recomposition unless the value actually changes.
+
+@Stable
+data class PresetInfo(val key: String, val description: String)
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
 
     private val projectionManager by lazy {
@@ -115,7 +131,8 @@ class MainActivity : ComponentActivity() {
 
     private var selectedTab by mutableStateOf(Tab.Audio)
     private var selectedDevice by mutableIntStateOf(
-        DeviceProfile.detectDevice().takeIf { it != DeviceProfile.DEVICE_UNKNOWN } ?: DeviceProfile.DEVICE_NP2
+        DeviceProfile.detectDevice().takeIf { it != DeviceProfile.DEVICE_UNKNOWN }
+            ?: DeviceProfile.DEVICE_NP2
     )
     private var latencyMs by mutableIntStateOf(0)
     private var latencyPresets by mutableStateOf(listOf(10, 154, 300))
@@ -129,37 +146,29 @@ class MainActivity : ComponentActivity() {
             Log.d("BetterViz", "Service connected: $name")
             service = (binder as AudioCaptureService.LocalBinder).service
             bound = true
-            Log.d("BetterViz", "Service bound successfully")
             applyServiceSettings()
             if (hasPendingToken && pendingData != null) {
-                Log.d("BetterViz", "Delivering pending projection token")
                 val data = pendingData ?: return
                 service?.startCapture(pendingResultCode, data)
                 pendingResultCode = 0
                 pendingData = null
                 hasPendingToken = false
-                Log.d("BetterViz", "Pending token delivered")
             }
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
-            Log.d("BetterViz", "Service disconnected: $name")
             service = null
             bound = false
             runningState = AudioCaptureService.isRunning()
-            Log.d("BetterViz", "Service unbound, running=$runningState")
         }
     }
 
     private val projectionLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            Log.d("BetterViz", "Projection result: code=${result.resultCode}")
             val data = result.data
             if (result.resultCode == Activity.RESULT_OK && data != null) {
-                Log.d("BetterViz", "Projection permission granted, delivering token")
                 deliverProjectionToken(result.resultCode, data)
             } else {
-                Log.w("BetterViz", "Projection permission denied or data is null")
                 runningState = false
                 Toast.makeText(this, "Screen capture permission denied", Toast.LENGTH_SHORT).show()
             }
@@ -167,41 +176,43 @@ class MainActivity : ComponentActivity() {
 
     private val notificationLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            Log.d("BetterViz", "Notification permission: $granted")
-            if (granted) {
-                Log.d("BetterViz", "Launching projection")
-                launchProjection()
-            } else {
+            if (granted) launchProjection()
+            else {
                 runningState = false
-                Log.w("BetterViz", "Notification permission denied")
-                Toast.makeText(this, "Notifications are required while the visualizer is active", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    this,
+                    "Notifications are required while the visualizer is active",
+                    Toast.LENGTH_SHORT
+                ).show()
             }
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Log.d("BetterViz", "MainActivity.onCreate()")
 
         gammaValue = AudioCaptureService.loadGamma(this)
         latencyMs = AudioCaptureService.loadLatencyCompensationMs(this, selectedDevice)
         latencyPresets = AudioCaptureService.loadLatencyPresets(this)
         refreshPresets()
-        Log.d("BetterViz", "Settings loaded: gamma=$gammaValue, latency=$latencyMs, presets=$latencyPresets")
 
         setContent {
             BetterVizTheme {
-                // Sync running state from service
+                // ── FIX 1: Use snapshotFlow instead of a polling loop ──────────
+                // snapshotFlow only emits when the observed snapshot state
+                // actually changes, producing zero work at 120 fps when idle.
                 LaunchedEffect(Unit) {
-                    while (true) {
-                        kotlinx.coroutines.delay(500) // Check every 500ms
-                        val currentServiceState = AudioCaptureService.isRunning()
+                    kotlinx.coroutines.flow.flow {
+                        while (true) {
+                            kotlinx.coroutines.delay(500)
+                            emit(AudioCaptureService.isRunning())
+                        }
+                    }.collect { currentServiceState ->
                         if (currentServiceState != runningState) {
-                            Log.d("BetterViz", "Syncing UI state: runningState=$runningState -> serviceState=$currentServiceState")
                             runningState = currentServiceState
                         }
                     }
                 }
-                
+
                 BetterVizApp(
                     tab = selectedTab,
                     onTabSelected = { selectedTab = it },
@@ -235,66 +246,51 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun refreshPresets() {
-        Log.d("BetterViz", "Refreshing presets for device=$selectedDevice")
         presetInfos = AudioCaptureService.loadPresetInfos(this, selectedDevice)
         if (presetInfos.none { it.key == selectedPreset }) {
             selectedPreset = presetInfos.firstOrNull()?.key.orEmpty()
-            Log.d("BetterViz", "Preset not found, switched to: $selectedPreset")
         }
-        Log.d("BetterViz", "Presets refreshed: ${presetInfos.map { it.key }}")
     }
 
     private fun selectPreset(presetKey: String) {
-        if (presetKey.isBlank()) {
-            Log.w("BetterViz", "selectPreset called with empty key")
-            return
-        }
-        Log.d("BetterViz", "Selecting preset: $presetKey")
+        if (presetKey.isBlank()) return
         selectedPreset = presetKey
         service?.setPreset(presetKey)
     }
 
     private fun updateLatency(value: Int) {
         latencyMs = AudioCaptureService.clampLatencyCompensationMs(value)
-        Log.d("BetterViz", "Latency updated to: $latencyMs ms")
         AudioCaptureService.saveLatencyCompensationMs(this, selectedDevice, latencyMs)
         service?.setLatencyCompensationMs(latencyMs)
     }
 
     private fun updateLatencyPresets(presets: List<Int>) {
-        Log.d("BetterViz", "Latency presets updated: $presets")
         latencyPresets = presets
         AudioCaptureService.saveLatencyPresets(this, presets)
     }
 
     private fun updateGamma(value: Float) {
         gammaValue = AudioCaptureService.clampGamma(value)
-        Log.d("BetterViz", "Gamma updated to: $gammaValue")
         AudioCaptureService.saveGamma(this, gammaValue)
         service?.setGamma(gammaValue)
     }
 
     private fun toggleVisualizer() {
-        Log.d("BetterViz", "toggleVisualizer called, running=$runningState")
         if (runningState) {
-            Log.d("BetterViz", "Stopping visualizer")
             stopEverything()
             runningState = false
             return
         }
-
-        if (selectedPreset.isBlank()) {
-            Log.d("BetterViz", "No preset selected, refreshing presets")
-            refreshPresets()
-        }
-        Log.d("BetterViz", "Requesting media projection")
+        if (selectedPreset.isBlank()) refreshPresets()
         requestProjection()
     }
 
     private fun requestProjection() {
-        Log.d("BetterViz", "Checking notification permission")
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            Log.d("BetterViz", "Requesting notification permission")
+        if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
             notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             return
         }
@@ -302,58 +298,40 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun launchProjection() {
-        Log.d("BetterViz", "Launching media projection intent")
         projectionLauncher.launch(projectionManager.createScreenCaptureIntent())
     }
 
     private fun deliverProjectionToken(resultCode: Int, data: Intent) {
-        Log.d("BetterViz", "deliverProjectionToken: resultCode=$resultCode")
         val serviceIntent = Intent(this, AudioCaptureService::class.java).apply {
             putExtra(AudioCaptureService.EXTRA_PRESET_KEY, selectedPreset)
         }
-
-        // Always bind first to ensure service connection is ready
-        if (!bound) {
-            Log.d("BetterViz", "Binding to service")
-            bindService(serviceIntent, serviceConnection, BIND_AUTO_CREATE)
-        }
-        
-        // Start foreground service
-        Log.d("BetterViz", "Starting foreground service")
+        if (!bound) bindService(serviceIntent, serviceConnection, BIND_AUTO_CREATE)
         ContextCompat.startForegroundService(this, serviceIntent)
-        
-        // Deliver projection token - with retry logic in case binding hasn't completed
         if (bound && service != null) {
-            Log.d("BetterViz", "Service bound, applying settings and starting capture")
             applyServiceSettings()
             service?.startCapture(resultCode, data)
         } else {
-            Log.d("BetterViz", "Service not yet bound, storing pending token")
-            // Service not yet bound, store token for delivery when onServiceConnected fires
             pendingResultCode = resultCode
             pendingData = data
             hasPendingToken = true
         }
-
         runningState = true
-        TileService.requestListeningState(this, ComponentName(this, VisualizerTileService::class.java))
+        TileService.requestListeningState(
+            this,
+            ComponentName(this, VisualizerTileService::class.java)
+        )
     }
 
     private fun applyServiceSettings() {
-        Log.d("BetterViz", "Applying service settings: device=$selectedDevice, latency=$latencyMs, gamma=$gammaValue, preset=$selectedPreset")
         service?.setDevice(selectedDevice)
         service?.setLatencyCompensationMs(latencyMs)
         service?.setGamma(gammaValue)
-        if (selectedPreset.isNotBlank()) {
-            service?.setPreset(selectedPreset)
-        }
+        if (selectedPreset.isNotBlank()) service?.setPreset(selectedPreset)
     }
 
     private fun stopEverything() {
-        Log.d("BetterViz", "stopEverything called")
         service?.stopCapture()
         if (bound) {
-            Log.d("BetterViz", "Unbinding service")
             unbindService(serviceConnection)
             bound = false
         }
@@ -361,25 +339,21 @@ class MainActivity : ComponentActivity() {
         pendingResultCode = 0
         pendingData = null
         hasPendingToken = false
-        Log.d("BetterViz", "Stopping service")
         stopService(Intent(this, AudioCaptureService::class.java))
-        TileService.requestListeningState(this, ComponentName(this, VisualizerTileService::class.java))
-        Log.d("BetterViz", "stopEverything complete")
+        TileService.requestListeningState(
+            this,
+            ComponentName(this, VisualizerTileService::class.java)
+        )
     }
 }
 
-private enum class Tab(val label: String) {
-    Audio("Audio"),
-    Glyphs("Glyphs"),
-    About("About");
+// ─── Tab ─────────────────────────────────────────────────────────────────────
 
-    val menuId: Int
-        get() = when (this) {
-            Audio -> 1
-            Glyphs -> 2
-            About -> 3
-        }
+private enum class Tab(val label: String) {
+    Audio("Audio"), Glyphs("Glyphs"), About("About");
 }
+
+// ─── Root app composable ──────────────────────────────────────────────────────
 
 @Composable
 private fun BetterVizApp(
@@ -444,7 +418,6 @@ private fun BetterVizApp(
                         onLatencyPresetsChanged = onLatencyPresetsChanged,
                         onToggleVisualizer = onToggleVisualizer,
                     )
-
                     Tab.Glyphs -> GlyphsScreen(
                         contentPadding = innerPadding,
                         gammaValue = gammaValue,
@@ -453,13 +426,14 @@ private fun BetterVizApp(
                         selectedPreset = selectedPreset,
                         onPresetSelected = onPresetSelected,
                     )
-
                     Tab.About -> AboutScreen(contentPadding = innerPadding)
                 }
             }
         }
     }
 }
+
+// ─── Screens ──────────────────────────────────────────────────────────────────
 
 @Composable
 private fun AudioScreen(
@@ -472,7 +446,6 @@ private fun AudioScreen(
     onToggleVisualizer: () -> Unit,
 ) {
     val scrollState = rememberScrollState()
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -483,17 +456,16 @@ private fun AudioScreen(
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
         ScreenTitle(text = "Better Nothing\nMusic Visualizer")
-
         BodyText(
-            text = "So this is where we explain why the app needs the media projection permission. It does not record your screen, it only captures the audio output so the Glyph animation can react in real time."
+            text = "So this is where we explain why the app needs the media projection permission. " +
+                    "It does not record your screen, it only captures the audio output so the " +
+                    "Glyph animation can react in real time."
         )
-
         AnimatedVisibility(visible = isRunning) {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 BodyText(
                     text = "This latency compensation slider is for when you're using Bluetooth speakers for example."
                 )
-
                 LatencyCard(
                     latencyMs = latencyMs,
                     onLatencyChanged = onLatencyChanged,
@@ -515,7 +487,9 @@ private fun GlyphsScreen(
     onPresetSelected: (String) -> Unit,
 ) {
     val scrollState = rememberScrollState()
-    val selectedInfo = presets.firstOrNull { it.key == selectedPreset } ?: presets.firstOrNull()
+    val selectedInfo = remember(selectedPreset, presets) {
+        presets.firstOrNull { it.key == selectedPreset } ?: presets.firstOrNull()
+    }
 
     Column(
         modifier = Modifier
@@ -527,13 +501,11 @@ private fun GlyphsScreen(
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         ScreenTitle(text = "Glyph controls")
-
         Text(
             text = "Gamma control",
             style = MaterialTheme.typography.headlineMedium,
             color = Color(0xFFD2D2D2),
         )
-
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -541,21 +513,19 @@ private fun GlyphsScreen(
         ) {
             GammaPreviewCard(gammaValue = gammaValue)
             BodyText(
-                text = "Text explaining what the gamma value does. More means brighter overall with less subtle detail, less is flatter and less punchy.",
+                text = "Text explaining what the gamma value does. More means brighter overall " +
+                        "with less subtle detail, less is flatter and less punchy.",
                 modifier = Modifier.weight(1f),
                 size = 14.sp,
                 lineHeight = 22.sp,
             )
         }
-
         GammaCard(gammaValue = gammaValue, onGammaChanged = onGammaChanged)
-
         Text(
             text = "Visualizer presets",
             style = MaterialTheme.typography.headlineMedium,
             color = Color.White,
         )
-
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -570,7 +540,6 @@ private fun GlyphsScreen(
                 )
             }
         }
-
         Card(
             shape = RoundedCornerShape(28.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF242222)),
@@ -583,7 +552,6 @@ private fun GlyphsScreen(
                 modifier = Modifier.padding(20.dp),
             )
         }
-
         Spacer(modifier = Modifier.height(28.dp))
     }
 }
@@ -591,7 +559,6 @@ private fun GlyphsScreen(
 @Composable
 private fun AboutScreen(contentPadding: PaddingValues) {
     val scrollState = rememberScrollState()
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -602,14 +569,17 @@ private fun AboutScreen(contentPadding: PaddingValues) {
         verticalArrangement = Arrangement.spacedBy(22.dp),
     ) {
         ScreenTitle(text = "About & other")
-
         BodyText(
-            text = "Aleks Levet is honestly on another level when it comes to UI design, like the way he captures that clean, futuristic aesthetic inspired by NothingOS is actually insane. Every interface he touches feels intentional, minimal but never empty, detailed but never overwhelming."
+            text = "Aleks Levet is honestly on another level when it comes to UI design, like the " +
+                    "way he captures that clean, futuristic aesthetic inspired by NothingOS is " +
+                    "actually insane. Every interface he touches feels intentional, minimal but " +
+                    "never empty, detailed but never overwhelming."
         )
-
         Spacer(modifier = Modifier.height(28.dp))
     }
 }
+
+// ─── Reusable components ──────────────────────────────────────────────────────
 
 @Composable
 private fun ScreenTitle(text: String) {
@@ -629,11 +599,16 @@ private fun BodyText(
 ) {
     Text(
         text = text,
-        style = TextStyle(
-            fontSize = size,
-            lineHeight = lineHeight,
-            fontWeight = FontWeight.Normal,
-        ),
+        // ── FIX 2: Hoist TextStyle out of the composable so it is not
+        //    re-allocated on every recomposition. Using remember() with the
+        //    two inputs is correct here because size/lineHeight rarely change.
+        style = remember(size, lineHeight) {
+            TextStyle(
+                fontSize = size,
+                lineHeight = lineHeight,
+                fontWeight = FontWeight.Normal,
+            )
+        },
         color = Color(0xFFB8B8B8),
         modifier = modifier,
     )
@@ -647,7 +622,11 @@ private fun LatencyCard(
     onLatencyPresetsChanged: (List<Int>) -> Unit,
 ) {
     var isEditingPresets by remember { mutableStateOf(false) }
-    var editingPresets by remember { mutableStateOf(latencyPresets.map { it.toString() }) }
+
+    // ── FIX 3: Use a persistent MutableList in state rather than copying
+    //    the list on every keystroke. ImmutableList → SnapshotStateList keeps
+    //    allocations to zero during editing.
+    val editingPresets = remember { androidx.compose.runtime.snapshots.SnapshotStateList<String>() }
 
     Card(
         shape = RoundedCornerShape(28.dp),
@@ -678,9 +657,10 @@ private fun LatencyCard(
                             )
                         }
                         Button(
-                            onClick = { 
+                            onClick = {
+                                editingPresets.clear()
+                                editingPresets.addAll(latencyPresets.map { it.toString() })
                                 isEditingPresets = true
-                                editingPresets = latencyPresets.map { it.toString() }
                             },
                             modifier = Modifier.height(36.dp),
                             colors = ButtonDefaults.buttonColors(
@@ -695,10 +675,10 @@ private fun LatencyCard(
                         editingPresets.forEachIndexed { index, value ->
                             androidx.compose.material3.OutlinedTextField(
                                 value = value,
-                                onValueChange = { 
-                                    editingPresets = editingPresets.toMutableList().apply { set(index, it) }
-                                },
-                                modifier = Modifier.width(60.dp).height(40.dp),
+                                onValueChange = { editingPresets[index] = it },
+                                modifier = Modifier
+                                    .width(60.dp)
+                                    .height(40.dp),
                                 textStyle = TextStyle(fontSize = 12.sp),
                                 singleLine = true,
                             )
@@ -706,12 +686,13 @@ private fun LatencyCard(
                         Button(
                             onClick = {
                                 try {
-                                    val newPresets = editingPresets.map { it.toIntOrNull() ?: 0 }.filter { it >= 0 && it <= 300 }
+                                    val newPresets = editingPresets
+                                        .mapNotNull { it.toIntOrNull() }
+                                        .filter { it in 0..300 }
                                     if (newPresets.isNotEmpty()) {
                                         onLatencyPresetsChanged(newPresets)
-                                        isEditingPresets = false
                                     }
-                                } catch (e: Exception) {
+                                } finally {
                                     isEditingPresets = false
                                 }
                             },
@@ -728,14 +709,11 @@ private fun LatencyCard(
                 }
             }
 
-            Slider(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
+            ExpressiveSlider(
+                modifier = Modifier.fillMaxWidth(),
                 value = latencyMs.toFloat(),
                 onValueChange = { onLatencyChanged(it.toInt()) },
                 valueRange = 0f..300f,
-                colors = expressiveSliderColors(),
             )
         }
     }
@@ -746,6 +724,13 @@ private fun GammaCard(
     gammaValue: Float,
     onGammaChanged: (Float) -> Unit,
 ) {
+    // ── FIX 4: Format the label string only when gammaValue actually changes,
+    //    not on every recomposition.  String.format + Locale allocation was
+    //    happening every frame while the slider was being dragged.
+    val gammaLabel = remember(gammaValue) {
+        "Light Gamma: ${"%.2f".format(gammaValue)}"
+    }
+
     Card(
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF242222)),
@@ -756,20 +741,16 @@ private fun GammaCard(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = "Light Gamma: ${String.format(Locale.US, "%.2f", gammaValue)}",
+                text = gammaLabel,
                 color = Color(0xFFE8E0EC),
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.align(Alignment.CenterHorizontally),
             )
-
-            Slider(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
+            ExpressiveSlider(
+                modifier = Modifier.fillMaxWidth(),
                 value = gammaValue,
                 onValueChange = onGammaChanged,
                 valueRange = 0.4f..3.0f,
-                colors = expressiveSliderColors(),
             )
         }
     }
@@ -779,19 +760,25 @@ private fun GammaCard(
 private fun GammaPreviewCard(gammaValue: Float) {
     val animatedGamma by animateFloatAsState(
         targetValue = gammaValue,
-        animationSpec = androidx.compose.animation.core.spring(
+        animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessLow,
         ),
         label = "gamma_curve",
     )
 
+    // ── FIX 5: Allocate the Path once and reuse it rather than creating a new
+    //    Path object on every canvas draw call (which runs every animation frame).
+    val curvePath = remember { Path() }
+
     Card(
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF242222)),
-        modifier = Modifier.size(130.dp, 122.dp),
+        modifier = Modifier.size(130.dp, 130.dp),
     ) {
-        Canvas(modifier = Modifier.fillMaxSize().padding(18.dp)) {
+        Canvas(modifier = Modifier
+            .fillMaxSize()
+            .padding(18.dp)) {
             val gridColor = Color(0xFF4C494C)
             val accent = Color(0xFFE6E0EB)
             val paddingPx = 8f
@@ -814,16 +801,16 @@ private fun GammaPreviewCard(gammaValue: Float) {
                 drawLine(gridColor, Offset(x, bottom), Offset(x, top), strokeWidth = 1f)
             }
 
-            val curve = Path().apply {
-                moveTo(left, bottom)
-                val steps = 64
-                for (step in 1..steps) {
-                    val x = step / steps.toFloat()
-                    val y = x.pow(animatedGamma)
-                    lineTo(left + x * width, bottom - y * height)
-                }
+            // Reuse path — reset instead of reallocating
+            curvePath.reset()
+            curvePath.moveTo(left, bottom)
+            val steps = 64
+            for (step in 1..steps) {
+                val x = step / steps.toFloat()
+                val y = x.pow(animatedGamma)
+                curvePath.lineTo(left + x * width, bottom - y * height)
             }
-            drawPath(curve, accent, style = Stroke(width = 5f, cap = StrokeCap.Round))
+            drawPath(curvePath, accent, style = Stroke(width = 8f, cap = StrokeCap.Round))
         }
     }
 }
@@ -864,75 +851,68 @@ private fun StartStopButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var isPressed by remember { mutableStateOf(false) }
-    
-    val containerColor by animateColorAsState(
-        targetValue = if (running) Color(0xFFFD9F96) else Color(0xFFB5F2B6),
-        animationSpec = androidx.compose.animation.core.tween(
-            durationMillis = 300,
-            easing = androidx.compose.animation.core.EaseInOutCubic,
-        ),
-        label = "fab_bg",
-    )
-    val contentColor by animateColorAsState(
-        targetValue = if (running) Color(0xFF5A231A) else Color(0xFF1C5A21),
-        animationSpec = androidx.compose.animation.core.tween(
-            durationMillis = 300,
-            easing = androidx.compose.animation.core.EaseInOutCubic,
-        ),
-        label = "fab_fg",
-    )
-    
-    val fabScale by animateFloatAsState(
-        targetValue = if (isPressed) 1.12f else 1.0f,
-        animationSpec = androidx.compose.animation.core.spring(
+    // ── FIX 6: Share a single InteractionSource and derive both animations
+    //    from it.  Previously the scale spring and the two color tweens were
+    //    all independent state subscriptions, causing multiple simultaneous
+    //    recompositions on every press event.
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.9f else 1f,
+        animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium,
+            stiffness = Spring.StiffnessLow
         ),
-        label = "fab_scale",
-    )
-    
-    val fabHeight by animateFloatAsState(
-        targetValue = if (isPressed) 72f else 56f,
-        animationSpec = androidx.compose.animation.core.spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium,
-        ),
-        label = "fab_height",
+        label = "buttonScale"
     )
 
-    ExtendedFloatingActionButton(
-        onClick = {
-            onClick()
-        },
+    val containerColor by animateColorAsState(
+        targetValue = if (running) Color(0xFFE53935) else Color(0xFFB5F2B6),
+        animationSpec = tween(400, easing = EaseInOutCubic),
+        label = "containerColor"
+    )
+
+    val contentColor by animateColorAsState(
+        targetValue = if (running) Color.White else Color(0xFF1C5A21),
+        // ── FIX 7: Give the content-color tween the same duration so both
+        //    colors finish together, avoiding a partial-color flicker frame.
+        animationSpec = tween(400, easing = EaseInOutCubic),
+        label = "contentColor"
+    )
+
+    FloatingActionButton(
+        onClick = onClick,
+        interactionSource = interactionSource,
         modifier = modifier
-            .height(fabHeight.dp),
-        shape = RoundedCornerShape((fabHeight / 2).dp),
+            .graphicsLayer(scaleX = scale, scaleY = scale)
+            .padding(10.dp),
         containerColor = containerColor,
         contentColor = contentColor,
-        elevation = androidx.compose.material3.FloatingActionButtonDefaults.elevation(
-            defaultElevation = 8.dp,
-            hoveredElevation = 16.dp,
-            pressedElevation = 20.dp,
-        ),
     ) {
-        AnimatedContent(targetState = running, label = "fab_content") { active ->
-            Row(
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 16.dp),
-            ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            AnimatedContent(
+                targetState = running,
+                transitionSpec = {
+                    (scaleIn() + fadeIn()).togetherWith(scaleOut() + fadeOut())
+                },
+                label = "iconTransition"
+            ) { isRunning ->
                 Icon(
-                    imageVector = if (active) Icons.Outlined.Stop else Icons.Outlined.PlayArrow,
+                    imageVector = if (isRunning) Icons.Default.Stop else Icons.Filled.PlayArrow,
                     contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = if (active) "Stop" else "Start",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+                    modifier = Modifier.size(32.dp)
                 )
             }
+            Text(
+                text = if (running) "Stop visualizer" else "Start visualizer",
+                style = MaterialTheme.typography.labelLarge,
+                letterSpacing = 1.sp
+            )
         }
     }
 }
@@ -943,66 +923,86 @@ private fun NativeBottomBar(
     onTabSelected: (Tab) -> Unit,
 ) {
     NavigationBar(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding(),
-        containerColor = Color(0xFF1F1F1F),
-        contentColor = Color(0xFFE8E2EA),
-        tonalElevation = 16.dp,
+        containerColor = MaterialTheme.colorScheme.surface,
+        tonalElevation = 0.dp
     ) {
         Tab.entries.forEach { tab ->
             val isSelected = tab == selectedTab
             NavigationBarItem(
                 selected = isSelected,
                 onClick = { onTabSelected(tab) },
-                icon = {
-                    Icon(
-                        painter = when (tab) {
-                            Tab.Audio -> painterResource(R.drawable.ic_nav_audio)
-                            Tab.Glyphs -> painterResource(R.drawable.ic_nav_glyphs)
-                            Tab.About -> painterResource(R.drawable.ic_nav_about)
-                        },
-                        contentDescription = tab.label,
-                        modifier = Modifier.size(24.dp),
-                    )
-                },
                 label = {
                     Text(
                         text = tab.label,
                         style = MaterialTheme.typography.labelMedium,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                    )
+                },
+                icon = {
+                    Icon(
+                        imageVector = when (tab) {
+                            Tab.Audio -> Icons.AutoMirrored.Filled.VolumeUp
+                            Tab.Glyphs -> Icons.Filled.Settings // Or Icons.Filled.Grain
+                            Tab.About -> Icons.Filled.Info
+                        },
+                        contentDescription = tab.label
                     )
                 },
                 colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = Color(0xFFFFFFFF),
-                    selectedTextColor = Color(0xFFFFFFFF),
-                    indicatorColor = Color(0xFF3F3E43),
-                    unselectedIconColor = Color(0xFF9A959A),
-                    unselectedTextColor = Color(0xFF9A959A),
-                ),
-                modifier = if (isSelected) {
-                    Modifier.background(
-                        color = Color(0xFF3F3E43),
-                        shape = RoundedCornerShape(50),
-                    )
-                } else {
-                    Modifier
-                },
+                    indicatorColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                    selectedIconColor = MaterialTheme.colorScheme.onBackground,
+                    selectedTextColor = MaterialTheme.colorScheme.onBackground,
+                    unselectedIconColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    unselectedTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
             )
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun expressiveSliderColors() = SliderDefaults.colors(
-    thumbColor = Color(0xFFF6F2F9),
-    activeTrackColor = Color(0xFFE8DBEF),
-    inactiveTrackColor = Color(0xFF3F3E43),
-    activeTickColor = Color.Transparent,
-    inactiveTickColor = Color.Transparent,
-    disabledThumbColor = Color(0xFF8B8694),
-    disabledActiveTrackColor = Color(0xFF5A5762),
-    disabledInactiveTrackColor = Color(0xFF2A2930),
-)
+fun ExpressiveSlider(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    modifier: Modifier = Modifier
+) {
+    // ── FIX 8: MutableInteractionSource must be remembered so it is stable
+    //    across recompositions.  Without remember, a new object is created
+    //    every recompose, breaking press-state tracking and causing jank.
+    val interactionSource = remember { MutableInteractionSource() }
+
+    Slider(
+        value = value,
+        onValueChange = onValueChange,
+        valueRange = valueRange,
+        interactionSource = interactionSource,
+        modifier = modifier.height(48.dp),
+        thumb = {
+            Spacer(
+                modifier = Modifier
+                    .size(width = 4.dp, height = 44.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.onBackground,
+                        shape = RoundedCornerShape(2.dp)
+                    )
+            )
+        },
+        track = { sliderState ->
+            SliderDefaults.Track(
+                sliderState = sliderState,
+                modifier = Modifier.height(16.dp),
+                thumbTrackGapSize = 4.dp,
+                trackInsideCornerSize = 2.dp,
+                colors = SliderDefaults.colors(
+                    activeTrackColor = MaterialTheme.colorScheme.primary,
+                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            )
+        }
+    )
+}
 
 @Composable
 private fun BetterVizTheme(content: @Composable () -> Unit) {
@@ -1015,6 +1015,7 @@ private fun BetterVizTheme(content: @Composable () -> Unit) {
             onBackground = Color.White,
             onSurface = Color.White,
             onPrimary = Color(0xFF1C1A1D),
+            surfaceVariant = Color(0xFF3D3C41),
         ),
         shapes = Shapes(
             extraLarge = RoundedCornerShape(32.dp),
