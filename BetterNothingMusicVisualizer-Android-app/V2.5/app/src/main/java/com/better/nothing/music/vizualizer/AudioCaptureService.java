@@ -18,6 +18,7 @@ import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Binder;
 import android.os.Build;
+import android.util.Log;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
@@ -85,11 +86,12 @@ public class AudioCaptureService extends Service {
     public void setBeatCallback(Runnable r) { mBeatListener = (energyd) -> { if (r != null) r.run(); }; }
     public static final String PRESET_VOCAL = "preset_vocal";
     public static final String PRESET_BASS = "preset_bass";
-    public static final float DEFAULT_GAMMA = 1f;
+    public static final float DEFAULT_GAMMA = 2f;
     private static final String PREFS_NAME = "glyph_visualizer_prefs";
     private static final String PREF_GAMMA = "gamma";
     private static final String PREF_LATENCY_PREFIX = "latency_device_";
-    private static final String DEFAULT_PRESET_KEY = "np2";
+    private static final String PREF_LATENCY_PRESETS = "latency_presets";
+    private static final String DEFAULT_PRESET_KEY = "np1s";
     private static final String PHONE_MODEL_UNKNOWN = "UNKNOWN";
     private static final String PHONE_MODEL_PHONE1 = "PHONE1";
     private static final String PHONE_MODEL_PHONE2 = "PHONE2";
@@ -265,15 +267,18 @@ public class AudioCaptureService extends Service {
 
     @Override
     public IBinder onBind(Intent intent) {
+        Log.d(TAG, "onBind() called");
         return mBinder;
     }
 
     @Override
     public void onCreate() {
         super.onCreate();
+        Log.d(TAG, "Service onCreate()");
         mSelectedDevice = DeviceProfile.detectDevice();
         mLatencyCompensationMs = loadLatencyCompensationMs(this, mSelectedDevice);
         mGamma = loadGamma(this);
+        Log.d(TAG, "Detected device: " + mSelectedDevice + ", loaded settings: latency=" + mLatencyCompensationMs + "ms, gamma=" + mGamma);
         try {
             refreshPresetCatalog();
             if (mAvailablePresetKeys.isEmpty()) {
@@ -284,22 +289,26 @@ public class AudioCaptureService extends Service {
             }
             mVisualizerConfig = loadVisualizerConfig(mPresetKey);
             resetVisualizerState();
-            Log.d(TAG, "Detected " + mDetectedPhoneModel + ", loaded preset " + mPresetKey);
+            Log.d(TAG, "Detected " + mDetectedPhoneModel + ", loaded preset " + mPresetKey + " with " + mVisualizerConfig.zones.length + " zones");
         } catch (Exception e) {
             Log.e(TAG, "Failed to load zones.config: " + e.getMessage(), e);
         }
 
         mGM = GlyphManager.getInstance(getApplicationContext());
         mGM.init(mGlyphCallback);
+        Log.d(TAG, "GlyphManager initialized");
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        Log.d(TAG, "onStartCommand() flags=" + flags + " startId=" + startId);
         String requestedPreset = intent != null ? intent.getStringExtra(EXTRA_PRESET_KEY) : null;
         if (requestedPreset != null && !requestedPreset.trim().isEmpty()) {
+            Log.d(TAG, "Preset requested: " + requestedPreset);
             setPreset(requestedPreset.trim());
         }
         startForeground(NOTIF_ID, buildNotification());
+        Log.d(TAG, "Started as foreground service");
         return START_NOT_STICKY;
     }
 
@@ -387,6 +396,35 @@ public class AudioCaptureService extends Service {
                 .apply();
     }
 
+    public static List<Integer> loadLatencyPresets(Context context) {
+        String saved = getPreferences(context).getString(PREF_LATENCY_PRESETS, null);
+        if (saved == null || saved.isEmpty()) {
+            return new ArrayList<>(Arrays.asList(10, 154, 300));
+        }
+        ArrayList<Integer> presets = new ArrayList<>();
+        try {
+            String[] parts = saved.split(",");
+            for (String part : parts) {
+                presets.add(Integer.parseInt(part.trim()));
+            }
+        } catch (Exception e) {
+            return new ArrayList<>(Arrays.asList(10, 154, 300));
+        }
+        return presets;
+    }
+
+    public static void saveLatencyPresets(Context context, List<Integer> presets) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < presets.size(); i++) {
+            if (i > 0) sb.append(",");
+            sb.append(presets.get(i));
+        }
+        getPreferences(context)
+                .edit()
+                .putString(PREF_LATENCY_PRESETS, sb.toString())
+                .apply();
+    }
+
     private static SharedPreferences getPreferences(Context context) {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
     }
@@ -407,35 +445,50 @@ public class AudioCaptureService extends Service {
     }
 
     public void setDevice(int device) {
+        Log.d(TAG, "setDevice: " + device);
         mSelectedDevice = device;
-        setLatencyCompensationMs(loadLatencyCompensationMs(this, device));
+        int newLatency = loadLatencyCompensationMs(this, device);
+        Log.d(TAG, "Device " + device + " loaded with latency=" + newLatency + "ms");
+        setLatencyCompensationMs(newLatency);
     }
 
     public void setLatencyCompensationMs(int latencyMs) {
         int clampedLatencyMs = clampLatencyCompensationMs(latencyMs);
         if (mLatencyCompensationMs != clampedLatencyMs) {
+            Log.d(TAG, "Latency compensation: " + mLatencyCompensationMs + "ms -> " + clampedLatencyMs + "ms");
             mLatencyCompensationMs = clampedLatencyMs;
             mLatencySettingsVersion++;
         }
     }
 
     public void setGamma(float gamma) {
-        mGamma = clampGamma(gamma);
+        float clamped = clampGamma(gamma);
+        if (mGamma != clamped) {
+            Log.d(TAG, "Gamma: " + mGamma + " -> " + clamped);
+            mGamma = clamped;
+        }
     }
 
     @Override
     public void onDestroy() {
+        Log.d(TAG, "Service onDestroy() called");
         sIsRunning = false;
         stopCapture();
         if (mSessionOpen) {
             try {
+                Log.d(TAG, "Closing GlyphManager session");
                 mGM.closeSession();
+                Log.d(TAG, "GlyphManager session closed");
             } catch (GlyphException ignored) {
+                Log.w(TAG, "Exception closing session: " + ignored.getMessage());
             }
         }
         if (mGM != null) {
+            Log.d(TAG, "Un-initializing GlyphManager");
             mGM.unInit();
+            Log.d(TAG, "GlyphManager uninitialized");
         }
+        Log.d(TAG, "Service onDestroy() complete");
         super.onDestroy();
     }
 
@@ -451,52 +504,78 @@ public class AudioCaptureService extends Service {
 
         MediaProjectionManager pm =
                 (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
-        mProjection = pm.getMediaProjection(resultCode, data);
-        if (mProjection == null) {
-            Log.e(TAG, "Null projection");
+        if (pm == null) {
+            Log.e(TAG, "MediaProjectionManager is null");
             sIsRunning = false;
             return;
         }
+        
+        mProjection = pm.getMediaProjection(resultCode, data);
+        if (mProjection == null) {
+            Log.e(TAG, "Null projection - user likely denied screen capture permission");
+            sIsRunning = false;
+            return;
+        }
+        
         mProjection.registerCallback(new MediaProjection.Callback() {
             @Override
             public void onStop() {
+                Log.d(TAG, "MediaProjection stopped");
                 stopCapture();
                 stopSelf();
             }
         }, mHandler);
 
+        mCapturing = true;
         mExecutor = Executors.newSingleThreadExecutor();
         mExecutor.submit(this::captureLoop);
         sIsRunning = true;
-        Log.d(TAG, "startCapture OK");
+        Log.d(TAG, "startCapture OK - capture loop started");
     }
 
     public void stopCapture() {
+        Log.d(TAG, "stopCapture() called, mCapturing=" + mCapturing);
         mCapturing = false;
         sIsRunning = false;
+        Log.d(TAG, "Stopped recording flags");
+        
         if (mAudioRecord != null) {
+            Log.d(TAG, "Releasing AudioRecord");
             AudioRecord audioRecord = mAudioRecord;
             mAudioRecord = null;
             try {
                 audioRecord.stop();
+                Log.d(TAG, "AudioRecord stopped");
             } catch (Exception ignored) {
+                Log.w(TAG, "Exception stopping AudioRecord: " + ignored.getMessage());
             }
             audioRecord.release();
+            Log.d(TAG, "AudioRecord released");
         }
+        
         if (mProjection != null) {
+            Log.d(TAG, "Stopping MediaProjection");
             MediaProjection projection = mProjection;
             mProjection = null;
             projection.stop();
+            Log.d(TAG, "MediaProjection stopped");
         }
+        
         if (mExecutor != null) {
+            Log.d(TAG, "Shutting down executor");
             ExecutorService executor = mExecutor;
             mExecutor = null;
             executor.shutdownNow();
+            Log.d(TAG, "Executor shut down");
         }
+        
+        Log.d(TAG, "Resetting visualizer state");
         resetVisualizerState();
         mHandler.post(() -> {
+            Log.d(TAG, "Turning off glyphs");
             turnOffGlyphsManually();
         });
+        Log.d(TAG, "stopCapture complete");
     }
 
     private void turnOffGlyphsManually() {
@@ -694,32 +773,9 @@ public class AudioCaptureService extends Service {
         mLastHash = hash;
 
         try {
-            mGM.setFrameColors(frameColors); //this is the way to have proper smooth brightness levels.
-            return;
+            mGM.setFrameColors(frameColors);
         } catch (Exception e) {
-            Log.w(TAG, "setFrameColors failed, falling back to channel toggles", e);
-        }
-
-        ArrayList<Integer> activeChannels = new ArrayList<>();
-        for (int zoneIndex = 0; zoneIndex < nextLightState.length; zoneIndex++) {
-            if (nextLightState[zoneIndex] > THRESHOLD) {
-                activeChannels.add(zoneIndex);
-            }
-        }
-
-        try {
-            if (activeChannels.isEmpty()) {
-                mGM.turnOff();
-                return;
-            }
-
-            GlyphFrame.Builder builder = mGM.getGlyphFrameBuilder();
-            for (int channel : activeChannels) {
-                builder.buildChannel(channel);
-            }
-            mGM.toggle(builder.build());
-        } catch (Exception e) {
-            Log.e(TAG, "Glyph update failed: " + e.getMessage(), e);
+            Log.w(TAG, "setFrameColors failed", e);
         }
     }
 
