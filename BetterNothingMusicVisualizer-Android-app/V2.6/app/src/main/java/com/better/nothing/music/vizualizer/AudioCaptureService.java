@@ -9,7 +9,6 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.pm.ApplicationInfo;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioPlaybackCaptureConfiguration;
@@ -23,13 +22,11 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.SystemClock;
-import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 
 import com.nothing.ketchum.Common;
 import com.nothing.ketchum.GlyphException;
-import com.nothing.ketchum.GlyphFrame;
 import com.nothing.ketchum.GlyphManager;
 
 import org.json.JSONArray;
@@ -58,16 +55,15 @@ import java.util.concurrent.Executors;
 
 /**
  * Real-time Nothing glyph visualizer driven by zones.config.
- *
  * The Java port now follows the same high-level pipeline as musicViz.py:
  *   FFT -> unique frequency peaks -> per-frequency decay ->
  *   overlapping zone mapping -> quadratic normalization ->
  *   optional percent slice mapping -> glyph output
- *
  * The only intentional runtime difference is normalization: the Python script
  * can normalize against the whole track, while the live service uses a rolling
  * per-zone peak because future frames are not known yet.
  */
+
 public class AudioCaptureService extends Service {
 
     private static final String TAG = "GlyphViz:Service";
@@ -75,17 +71,6 @@ public class AudioCaptureService extends Service {
     private static final int NOTIF_ID = 1;
 
     public static final String EXTRA_PRESET_KEY = "preset_key";
-
-    /** Called on the main thread with overall energy 0-1 every processed frame */
-    public interface BeatListener {
-        void onBeat(float energy);
-    }
-    private volatile BeatListener mBeatListener = null;
-    public void setBeatListener(BeatListener l) { mBeatListener = l; }
-    /** Convenience: accept a plain Runnable as beat callback */
-    public void setBeatCallback(Runnable r) { mBeatListener = (energyd) -> { if (r != null) r.run(); }; }
-    public static final String PRESET_VOCAL = "preset_vocal";
-    public static final String PRESET_BASS = "preset_bass";
     public static final float DEFAULT_GAMMA = 2f;
     private static final String PREFS_NAME = "glyph_visualizer_prefs";
     private static final String PREF_GAMMA = "gamma";
@@ -107,12 +92,10 @@ public class AudioCaptureService extends Service {
     private static final int FFT_SIZE = nextPowerOfTwo(ANALYSIS_WINDOW);
     private static final float HZ_PER_BIN = (float) SAMPLE_RATE / FFT_SIZE;
 
-    private static final float THRESHOLD = 0.06f;
     private static final float PEAK_FALLOFF = 0.9995f;
     private static final float PYTHON_FREQ_MULTIPLIER = 4f;
     private static final float EPSILON = 0.000001f;
     private static final long MIN_SEND_MS = 16L;
-    private static final int MAX_LATENCY_COMPENSATION_MS = 300;
     private static volatile boolean sIsRunning = false;
 
     private final Handler mHandler = new Handler(Looper.getMainLooper());
@@ -128,7 +111,6 @@ public class AudioCaptureService extends Service {
 
     private volatile VisualizerConfig mVisualizerConfig;
     private String mPresetKey = DEFAULT_PRESET_KEY;
-    private String mPresetMode = PRESET_VOCAL;
     private String mDetectedPhoneModel = PHONE_MODEL_UNKNOWN;
     private List<String> mAvailablePresetKeys = Collections.emptyList();
     private int mSelectedDevice = DeviceProfile.DEVICE_UNKNOWN;
@@ -181,23 +163,12 @@ public class AudioCaptureService extends Service {
         }
     }
 
-    private static final class ZoneSpec {
-        final float lowHz;
-        final float highHz;
-        final float lowPercent;
-        final float highPercent;
-
-        ZoneSpec(float lowHz, float highHz, float lowPercent, float highPercent) {
-            this.lowHz = lowHz;
-            this.highHz = highHz;
-            this.lowPercent = lowPercent;
-            this.highPercent = highPercent;
-        }
+    private record ZoneSpec(float lowHz, float highHz, float lowPercent, float highPercent) {
 
         boolean hasPercentSlice() {
-            return !Float.isNaN(lowPercent) && !Float.isNaN(highPercent);
+                return !Float.isNaN(lowPercent) && !Float.isNaN(highPercent);
+            }
         }
-    }
 
     private static final class FrequencyRange {
         final float lowHz;
@@ -213,43 +184,13 @@ public class AudioCaptureService extends Service {
         }
     }
 
-    private static final class VisualizerConfig {
-        final String presetKey;
-        final String description;
-        final float decay;
-        final ZoneSpec[] zones;
-        final FrequencyRange[] uniqueRanges;
-        final int[][] zoneToRangeIndices;
-
-        VisualizerConfig(
-                String presetKey,
-                String description,
-                float decay,
-                ZoneSpec[] zones,
-                FrequencyRange[] uniqueRanges,
-                int[][] zoneToRangeIndices
-        ) {
-            this.presetKey = presetKey;
-            this.description = description;
-            this.decay = decay;
-            this.zones = zones;
-            this.uniqueRanges = uniqueRanges;
-            this.zoneToRangeIndices = zoneToRangeIndices;
-        }
+    private record VisualizerConfig(String presetKey, String description, float decay,
+                                    ZoneSpec[] zones, FrequencyRange[] uniqueRanges,
+                                    int[][] zoneToRangeIndices) {
     }
 
-    private static final class PendingFrame {
-        final float[] uniquePeaks;
-        final VisualizerConfig config;
-        final int configVersion;
-        final long dueAtMs;
-
-        PendingFrame(float[] uniquePeaks, VisualizerConfig config, int configVersion, long dueAtMs) {
-            this.uniquePeaks = uniquePeaks;
-            this.config = config;
-            this.configVersion = configVersion;
-            this.dueAtMs = dueAtMs;
-        }
+    private record PendingFrame(float[] uniquePeaks, VisualizerConfig config, int configVersion,
+                                long dueAtMs) {
     }
 
     public static final class PresetInfo {
@@ -307,14 +248,6 @@ public class AudioCaptureService extends Service {
         startForeground(NOTIF_ID, buildNotification());
         Log.d(TAG, "Started as foreground service");
         return START_NOT_STICKY;
-    }
-
-    public String getDetectedPhoneModel() {
-        return mDetectedPhoneModel;
-    }
-
-    public List<String> getAvailablePresetKeys() {
-        return new ArrayList<>(mAvailablePresetKeys);
     }
 
     public static List<PresetInfo> loadPresetInfos(Context context, int device) {
@@ -417,9 +350,6 @@ public class AudioCaptureService extends Service {
             return;
         }
         String trimmedSelection = presetSelection.trim();
-        if (PRESET_VOCAL.equals(trimmedSelection) || PRESET_BASS.equals(trimmedSelection)) {
-            mPresetMode = trimmedSelection;
-        }
         applyPresetSelection(trimmedSelection);
     }
 
@@ -579,20 +509,14 @@ public class AudioCaptureService extends Service {
         if (mCurrentLightState.length > 0) {
             return mCurrentLightState.length;
         }
-        switch (mSelectedDevice) {
-            case DeviceProfile.DEVICE_NP1:
-                return 15;
-            case DeviceProfile.DEVICE_NP2:
-                return 33;
-            case DeviceProfile.DEVICE_NP2A:
-                return 26;
-            case DeviceProfile.DEVICE_NP3A:
-                return 36;
-            case DeviceProfile.DEVICE_NP4A:
-                return 6;
-            default:
-                return 0;
-        }
+        return switch (mSelectedDevice) {
+            case DeviceProfile.DEVICE_NP1 -> 15;
+            case DeviceProfile.DEVICE_NP2 -> 33;
+            case DeviceProfile.DEVICE_NP2A -> 26;
+            case DeviceProfile.DEVICE_NP3A -> 36;
+            case DeviceProfile.DEVICE_NP4A -> 6;
+            default -> 0;
+        };
     }
 
     private void captureLoop() {
@@ -732,13 +656,6 @@ public class AudioCaptureService extends Service {
 
         int[] frameColors = buildFrameColors(nextLightState, config.zones.length);
 
-        // Compute overall energy for beat UI callback
-        float overallEnergy = 0f;
-        for (float v : nextLightState) overallEnergy = Math.max(overallEnergy, v);
-        final float beatEnergy = overallEnergy;
-        final BeatListener bl = mBeatListener;
-        if (bl != null) mHandler.post(() -> bl.onBeat(beatEnergy));
-
         int hash = Arrays.hashCode(frameColors);
         if (hash == mLastHash) {
             return;
@@ -756,7 +673,7 @@ public class AudioCaptureService extends Service {
         int[] frameColors = new int[expectedLength];
         int count = Math.min(normalizedLightState.length, expectedLength);
         for (int i = 0; i < count; i++) {
-            float gammaAdjusted = applyGamma(clamp01(normalizedLightState[i]));
+            float gammaAdjusted = applyGamma(normalizedLightState[i]);
             frameColors[i] = Math.round(gammaAdjusted * 4095f);
         }
         return frameColors;
@@ -781,7 +698,7 @@ public class AudioCaptureService extends Service {
         if (normalizedValue <= 0f) {
             return 0f;
         }
-        return clamp01((float) Math.pow(normalizedValue, mGamma));
+        return ((float) Math.pow(normalizedValue, mGamma));
     }
 
     private float[] computeNextLightState(float[] uniquePeaks, VisualizerConfig config) {
@@ -802,10 +719,10 @@ public class AudioCaptureService extends Service {
                 mZonePeaks[zoneIndex] = EPSILON;
             }
 
-            float normalized = clamp01(rawZonePeak / mZonePeaks[zoneIndex]);
+            float normalized = (rawZonePeak / mZonePeaks[zoneIndex]);
             float quadratic = normalized * normalized;
             float mapped = applyPercentSlice(quadratic, config.zones[zoneIndex]);
-            nextState[zoneIndex] = mapped < EPSILON ? 0f : clamp01(mapped);
+            nextState[zoneIndex] = mapped < EPSILON ? 0f : mapped;
         }
 
         return nextState;
@@ -995,7 +912,7 @@ public class AudioCaptureService extends Service {
             double decayAlpha,
             ZoneSpec[] zones
     ) {
-        float adjustedDecay = clamp(0.86f + ((float) decayAlpha / 10f), 0f, 0.9999f);
+        float adjustedDecay = 0.86f + ((float) decayAlpha / 10f);
         List<float[]> uniquePairs = new ArrayList<>();
         Set<String> seenPairs = new HashSet<>();
 
@@ -1006,7 +923,7 @@ public class AudioCaptureService extends Service {
             }
         }
 
-        Collections.sort(uniquePairs, new Comparator<float[]>() {
+        uniquePairs.sort(new Comparator<>() {
             @Override
             public int compare(float[] left, float[] right) {
                 int lowCompare = Float.compare(left[0], right[0]);
@@ -1068,25 +985,25 @@ public class AudioCaptureService extends Service {
     }
 
     private static String presetKeyForDevice(int device) {
-        switch (device) {
-            case DeviceProfile.DEVICE_NP1:  return "np1";
-            case DeviceProfile.DEVICE_NP2:  return "np2";
-            case DeviceProfile.DEVICE_NP2A: return "np2a";
-            case DeviceProfile.DEVICE_NP3A: return "np3a";
-            case DeviceProfile.DEVICE_NP4A: return "np4a";
-            default: return null;
-        }
+        return switch (device) {
+            case DeviceProfile.DEVICE_NP1 -> "np1";
+            case DeviceProfile.DEVICE_NP2 -> "np2";
+            case DeviceProfile.DEVICE_NP2A -> "np2a";
+            case DeviceProfile.DEVICE_NP3A -> "np3a";
+            case DeviceProfile.DEVICE_NP4A -> "np4a";
+            default -> null;
+        };
     }
 
     private static String phoneModelForDevice(int device) {
-        switch (device) {
-            case DeviceProfile.DEVICE_NP1:  return PHONE_MODEL_PHONE1;
-            case DeviceProfile.DEVICE_NP2:  return PHONE_MODEL_PHONE2;
-            case DeviceProfile.DEVICE_NP2A: return PHONE_MODEL_PHONE2A;
-            case DeviceProfile.DEVICE_NP3A: return PHONE_MODEL_PHONE3A;
-            case DeviceProfile.DEVICE_NP4A: return PHONE_MODEL_PHONE4A;
-            default: return PHONE_MODEL_UNKNOWN;
-        }
+        return switch (device) {
+            case DeviceProfile.DEVICE_NP1 -> PHONE_MODEL_PHONE1;
+            case DeviceProfile.DEVICE_NP2 -> PHONE_MODEL_PHONE2;
+            case DeviceProfile.DEVICE_NP2A -> PHONE_MODEL_PHONE2A;
+            case DeviceProfile.DEVICE_NP3A -> PHONE_MODEL_PHONE3A;
+            case DeviceProfile.DEVICE_NP4A -> PHONE_MODEL_PHONE4A;
+            default -> PHONE_MODEL_UNKNOWN;
+        };
     }
 
     private static String readFile(File file) throws IOException {
@@ -1142,7 +1059,7 @@ public class AudioCaptureService extends Service {
             if (value >= 0f && value <= 1f) {
                 value *= 100f;
             }
-            return clamp(value, 0f, 100f);
+            return value;
         } catch (Exception ignored) {
             return Float.NaN;
         }
@@ -1166,14 +1083,6 @@ public class AudioCaptureService extends Service {
             power <<= 1;
         }
         return power;
-    }
-
-    private static float clamp(float value, float min, float max) {
-        return Math.max(min, Math.min(max, value));
-    }
-
-    private static float clamp01(float value) {
-        return clamp(value, 0f, 1f);
     }
 
     private static void fft(float[] re, float[] im, int n) {
@@ -1450,8 +1359,6 @@ public class AudioCaptureService extends Service {
             preferred = "np2a";
         } else if (PHONE_MODEL_PHONE3A.equals(phoneModel)) {
             preferred = "np3a";
-        } else if (PHONE_MODEL_PHONE3A.equals(phoneModel)) {
-            preferred = "np3a";
         } else if (PHONE_MODEL_PHONE4A.equals(phoneModel)) {
             preferred = "np4a";
         } else if (PHONE_MODEL_PHONE3.equals(phoneModel)) {
@@ -1479,11 +1386,11 @@ public class AudioCaptureService extends Service {
         }
 
         String buildText = (
-                String.valueOf(Build.MANUFACTURER) + " "
-                        + String.valueOf(Build.BRAND) + " "
-                        + String.valueOf(Build.MODEL) + " "
-                        + String.valueOf(Build.DEVICE) + " "
-                        + String.valueOf(Build.PRODUCT)
+                Build.MANUFACTURER + " "
+                        + Build.BRAND + " "
+                        + Build.MODEL + " "
+                        + Build.DEVICE + " "
+                        + Build.PRODUCT
         ).toLowerCase(Locale.US);
 
         if (buildText.contains("phone 3a")) {

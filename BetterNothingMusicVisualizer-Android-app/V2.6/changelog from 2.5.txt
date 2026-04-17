@@ -10,3 +10,4 @@ enhanced layout and spacing a bit
 refined font sizes
 removed gray color on statusbar
 the pure black theme is even more pure black now
+removed useless shit
