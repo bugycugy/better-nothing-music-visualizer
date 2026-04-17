@@ -158,7 +158,7 @@ public class AudioCaptureService extends Service {
             } else if (Common.is24111()) {
                 mGM.register(com.nothing.ketchum.Glyph.DEVICE_24111);
             } else {
-                mGM.register(com.nothing.ketchum.Glyph.DEVICE_25111);  // Phone 4a
+                mGM.register(com.nothing.ketchum.Glyph.DEVICE_25111);  // Phone 4a noice
             }
             try {
                 mGM.openSession();
@@ -354,26 +354,24 @@ public class AudioCaptureService extends Service {
     }
 
     public static int loadLatencyCompensationMs(Context context, int device) {
-        return clampLatencyCompensationMs(
-                getPreferences(context).getInt(latencyPreferenceKey(device), 0)
-        );
+        return  getPreferences(context).getInt(latencyPreferenceKey(device), 0);
     }
 
     public static void saveLatencyCompensationMs(Context context, int device, int latencyMs) {
         getPreferences(context)
                 .edit()
-                .putInt(latencyPreferenceKey(device), clampLatencyCompensationMs(latencyMs))
+                .putInt(latencyPreferenceKey(device), latencyMs)
                 .apply();
     }
 
     public static float loadGamma(Context context) {
-        return clampGamma(getPreferences(context).getFloat(PREF_GAMMA, DEFAULT_GAMMA));
+        return getPreferences(context).getFloat(PREF_GAMMA, DEFAULT_GAMMA);
     }
 
     public static void saveGamma(Context context, float gamma) {
         getPreferences(context)
                 .edit()
-                .putFloat(PREF_GAMMA, clampGamma(gamma))
+                .putFloat(PREF_GAMMA, gamma)
                 .apply();
     }
 
@@ -875,12 +873,9 @@ public class AudioCaptureService extends Service {
     }
 
     private VisualizerConfig loadVisualizerConfig(String presetKey) throws IOException, JSONException {
-        try {
-            return loadVisualizerConfigFromZonesConfig(presetKey);
-        } catch (FileNotFoundException e) {
-            Log.w(TAG, "zones.config missing, using built-in preset catalog");
-            return loadBuiltInVisualizerConfig(presetKey);
-        }
+        // Logic is now linear: if the JSON config fails, an exception is thrown
+        // and handled by the caller (applyPresetSelection).
+        return loadVisualizerConfigFromZonesConfig(presetKey);
     }
 
     private VisualizerConfig loadVisualizerConfigFromZonesConfig(String presetKey)
@@ -888,6 +883,7 @@ public class AudioCaptureService extends Service {
         String rawJson = loadZonesConfigText();
         JSONObject root = new JSONObject(rawJson);
         JSONObject preset = root.optJSONObject(presetKey);
+
         if (preset == null) {
             throw new JSONException("Preset '" + presetKey + "' not found in zones.config");
         }
@@ -900,6 +896,7 @@ public class AudioCaptureService extends Service {
         double decayAlpha = preset.has("decay-alpha")
                 ? preset.optDouble("decay-alpha", 0.8)
                 : root.optDouble("decay-alpha", 0.8);
+
         ZoneSpec[] zones = parseZoneSpecs(zonesArray);
         return buildVisualizerConfig(
                 presetKey,
@@ -910,38 +907,25 @@ public class AudioCaptureService extends Service {
     }
 
     private String loadZonesConfigText() throws IOException {
-        return loadZonesConfigText(this);
-    }
-
-    private static String loadZonesConfigText(Context context) throws IOException {
         InputStream in = null;
+        Context context = this; // Assuming this method resides in a Context-aware class
+
+        // 1. Try Assets (Primary location)
         try {
             in = context.getAssets().open("zones.config");
             return readFully(in);
         } catch (IOException ignored) {
+            // Fall through to check filesystem
+        } finally {
             closeQuietly(in);
         }
 
-        ClassLoader loader = AudioCaptureService.class.getClassLoader();
-        if (loader != null) {
-            in = loader.getResourceAsStream("zones.config");
-            if (in != null) {
-                try {
-                    return readFully(in);
-                } finally {
-                    closeQuietly(in);
-                }
-            }
-        }
-
-        ApplicationInfo appInfo = context.getApplicationInfo();
+        // 2. Try Internal/External Filesystem locations
         File externalDir = context.getExternalFilesDir(null);
         File[] candidates = new File[]{
                 new File(context.getFilesDir(), "zones.config"),
                 externalDir == null ? null : new File(externalDir, "zones.config"),
-                new File(appInfo.dataDir, "zones.config"),
-                new File("zones.config"),
-                new File("BetterNothingMusicVisualizer-Android-app/zones.config")
+                new File(context.getApplicationInfo().dataDir, "zones.config")
         };
 
         for (File candidate : candidates) {
@@ -950,30 +934,38 @@ public class AudioCaptureService extends Service {
             }
         }
 
+        // No fallback to internal presets. If it's not in the files, it's an error.
         throw new FileNotFoundException(
-                "zones.config not found. Bundle it as an asset or place it in app files."
+                "zones.config not found. Please bundle it as an asset or place it in the app's files directory."
         );
     }
 
     private void applyPresetSelection(String presetSelection) {
         try {
+            // refreshPresetCatalog should now strictly parse the JSON file to populate mAvailablePresetKeys
             refreshPresetCatalog();
+
             String resolvedPresetKey = resolvePresetKey(presetSelection, mAvailablePresetKeys);
+
             if (!resolvedPresetKey.equals(mPresetKey) || mVisualizerConfig == null) {
+                // This will throw an exception if the key doesn't exist in the JSON
                 mVisualizerConfig = loadVisualizerConfig(resolvedPresetKey);
                 mPresetKey = resolvedPresetKey;
                 mPresetConfigVersion++;
                 resetVisualizerState();
                 refreshNotification();
-                Log.d(TAG, "Resolved preset '" + presetSelection + "' to '" + mPresetKey + "'");
+                Log.d(TAG, "Applied preset '" + mPresetKey + "' from config file.");
             }
         } catch (Exception e) {
-            Log.e(TAG, "Failed to apply preset selection: " + presetSelection, e);
+            Log.e(TAG, "Failed to apply preset selection: " + presetSelection + ". No fallback available.", e);
+            // Set config to null to prevent the visualizer from running with invalid/missing data
+            mVisualizerConfig = null;
         }
     }
 
     private String resolvePresetKey(String presetSelection, List<String> availablePresetKeys) {
         if (availablePresetKeys == null || availablePresetKeys.isEmpty()) {
+            // Without a fallback catalog, this usually indicates the JSON failed to load
             return DEFAULT_PRESET_KEY;
         }
 
@@ -982,14 +974,6 @@ public class AudioCaptureService extends Service {
         }
 
         String devicePresetKey = presetKeyForDevice(mSelectedDevice);
-        String preferredMode = PRESET_BASS.equals(presetSelection) ? PRESET_BASS : PRESET_VOCAL;
-        String[] candidates = buildPresetCandidates(devicePresetKey, preferredMode);
-        for (String candidate : candidates) {
-            if (availablePresetKeys.contains(candidate)) {
-                return candidate;
-            }
-        }
-
         if (devicePresetKey != null && availablePresetKeys.contains(devicePresetKey)) {
             return devicePresetKey;
         }
@@ -999,84 +983,8 @@ public class AudioCaptureService extends Service {
             return defaultPreset;
         }
 
+        // If all else fails, pick the first one defined in the JSON
         return availablePresetKeys.get(0);
-    }
-
-    private VisualizerConfig loadBuiltInVisualizerConfig(String presetKey) throws JSONException {
-        switch (presetKey) {
-            case "np1":
-                return buildVisualizerConfig(
-                        presetKey,
-                        "Built-in vocal preset for Phone (1)",
-                        0.8d,
-                        buildZoneSpecs(DeviceProfile.VOCAL_NP1)
-                );
-            case "np2":
-                return buildVisualizerConfig(
-                        presetKey,
-                        "Built-in vocal preset for Phone (2)",
-                        0.8d,
-                        buildNp2VocalZones()
-                );
-            case "np2a":
-                return buildVisualizerConfig(
-                        presetKey,
-                        "Built-in vocal preset for Phone (2a)",
-                        0.8d,
-                        buildZoneSpecs(DeviceProfile.VOCAL_NP2A)
-                );
-            case "np3a":
-                return buildVisualizerConfig(
-                        presetKey,
-                        "Built-in vocal preset for Phone (3a)",
-                        0.8d,
-                        buildZoneSpecs(DeviceProfile.VOCAL_NP3A)
-                );
-            case "np1_bass":
-                return buildVisualizerConfig(
-                        presetKey,
-                        "Built-in bass preset for Phone (1)",
-                        0.8d,
-                        buildNp1BassZones()
-                );
-            case "np2_bass":
-                return buildVisualizerConfig(
-                        presetKey,
-                        "Built-in bass preset for Phone (2)",
-                        0.8d,
-                        buildNp2BassZones()
-                );
-            case "np2a_bass":
-                return buildVisualizerConfig(
-                        presetKey,
-                        "Built-in bass preset for Phone (2a)",
-                        0.8d,
-                        buildNp2aBassZones()
-                );
-            case "np3a_bass":
-                return buildVisualizerConfig(
-                        presetKey,
-                        "Built-in bass preset for Phone (3a)",
-                        0.8d,
-                        buildNp3aBassZones()
-                );
-            case "np4a":
-                return buildVisualizerConfig(
-                        presetKey,
-                        "Vocal Heavy — full spectrum on 6 LEDs",
-                        0.8d,
-                        buildZoneSpecs(DeviceProfile.VOCAL_NP4A)
-                );
-            case "np4a_bass":
-                return buildVisualizerConfig(
-                        presetKey,
-                        "Bass Heavy — beat-reactive cumulative fill",
-                        0.8d,
-                        buildNp4aBassZones()
-                );
-            default:
-                throw new JSONException("Preset '" + presetKey + "' not found in built-in preset catalog");
-        }
     }
 
     private VisualizerConfig buildVisualizerConfig(
@@ -1143,6 +1051,7 @@ public class AudioCaptureService extends Service {
             JSONArray zoneArray = zonesArray.getJSONArray(i);
             float lowHz = (float) zoneArray.getDouble(0);
             float highHz = (float) zoneArray.getDouble(1);
+
             if (lowHz > highHz) {
                 float tmp = lowHz;
                 lowHz = highHz;
@@ -1156,182 +1065,25 @@ public class AudioCaptureService extends Service {
         return zones;
     }
 
-    private ZoneSpec[] buildZoneSpecs(float[][] rows) {
-        ZoneSpec[] zones = new ZoneSpec[rows.length];
-        for (int i = 0; i < rows.length; i++) {
-            zones[i] = zone(rows[i][0], rows[i][1]);
-        }
-        return zones;
-    }
-
-    private ZoneSpec[] buildNp2VocalZones() {
-        ZoneSpec[] zones = buildZoneSpecs(DeviceProfile.VOCAL_NP2);
-        zones[24] = zone(DeviceProfile.VOCAL_NP2[24][0], DeviceProfile.VOCAL_NP2[24][1], 0f, 70f);
-        return zones;
-    }
-
-    private ZoneSpec[] buildNp1BassZones() {
-        ZoneSpec[] zones = new ZoneSpec[15];
-        zones[0] = zone(200f, 600f);
-        zones[1] = zone(2000f, 8000f);
-        zones[2] = zone(200f, 600f);
-        zones[3] = zone(600f, 2000f);
-        zones[4] = zone(20f, 90f);
-        zones[5] = zone(90f, 200f);
-        zones[6] = zone(8000f, 20000f);
-        fillPercentBar(zones, 7, 8, 20f, 200f);
-        return zones;
-    }
-
-    private ZoneSpec[] buildNp2BassZones() {
-        ZoneSpec[] zones = new ZoneSpec[33];
-        zones[0] = zone(400f, 1000f);
-        zones[1] = zone(1000f, 3000f);
-        zones[2] = zone(3000f, 6000f);
-        fillPercentBar(zones, 3, 16, 20f, 200f);
-        zones[19] = zone(6000f, 12000f);
-        zones[20] = zone(12000f, 20000f);
-        zones[21] = zone(180f, 400f);
-        zones[22] = zone(80f, 180f);
-        zones[23] = zone(20f, 80f);
-        zones[24] = zone(4000f, 16000f, 0f, 70f);
-        fillPercentBar(zones, 25, 8, 20f, 200f);
-        return zones;
-    }
-
-    private ZoneSpec[] buildNp2aBassZones() {
-        ZoneSpec[] zones = new ZoneSpec[26];
-        fillPercentBar(zones, 0, 16, 20f, 200f);
-        zones[16] = zone(250f, 400f);
-        zones[17] = zone(400f, 700f);
-        zones[18] = zone(700f, 1200f);
-        zones[19] = zone(1000f, 3000f);
-        zones[20] = zone(400f, 1000f);
-        zones[21] = zone(180f, 400f);
-        zones[22] = zone(80f, 180f);
-        zones[23] = zone(20f, 80f);
-        zones[24] = zone(8000f, 20000f);
-        zones[25] = zone(3000f, 8000f);
-        return zones;
-    }
-
-    private ZoneSpec[] buildNp3aBassZones() {
-        ZoneSpec[] zones = new ZoneSpec[36];
-        fillPercentBar(zones, 0, 16, 20f, 200f);
-        zones[16] = zone(400f, 700f);
-        zones[17] = zone(180f, 400f);
-        zones[18] = zone(80f, 180f);
-        zones[19] = zone(20f, 80f);
-        fillPercentBar(zones, 20, 8, 20f, 200f);
-        zones[28] = zone(700f, 1500f);
-        zones[29] = zone(1000f, 3000f);
-        zones[30] = zone(400f, 1000f);
-        zones[31] = zone(2000f, 4000f);
-        zones[32] = zone(4000f, 7000f);
-        zones[33] = zone(12000f, 20000f);
-        zones[34] = zone(6000f, 12000f);
-        zones[35] = zone(3000f, 6000f);
-        return zones;
-    }
-
-
-    /**
-     * Phone (4a) — 6 LEDs (A1-A6 = indices 0-5)
-     * Bass Heavy: cumulative percent-bar fill from bottom (A6=sub-bass) to top (A1=treble).
-     * All 6 zones share the same bass frequency range (20-160 Hz), each covering a
-     * successive 1/6 slice of the normalised level so they light up sequentially.
-     * The result is a rising bar that visually fills upward as the beat hits.
-     */
-    private ZoneSpec[] buildNp4aBassZones() {
-        ZoneSpec[] zones = new ZoneSpec[6];
-        // A6 (idx 5) = lowest slice, fires first on any bass energy
-        zones[5] = zone(20f, 160f,  0f,  17f);
-        zones[4] = zone(20f, 160f, 17f,  33f);
-        zones[3] = zone(20f, 160f, 33f,  50f);
-        zones[2] = zone(20f, 160f, 50f,  67f);
-        zones[1] = zone(20f, 160f, 67f,  83f);
-        // A1 (idx 0) = top slice, only on peak bass hits
-        zones[0] = zone(20f, 160f, 83f, 100f);
-        return zones;
-    }
-
-    private void fillPercentBar(ZoneSpec[] zones, int startIndex, int segmentCount, float lowHz, float highHz) {
-        float step = 100f / segmentCount;
-        for (int i = 0; i < segmentCount; i++) {
-            zones[startIndex + i] = zone(lowHz, highHz, step * i, step * (i + 1));
-        }
-    }
-
-    private static ZoneSpec zone(float lowHz, float highHz) {
-        return new ZoneSpec(lowHz, highHz, Float.NaN, Float.NaN);
-    }
-
-    private static ZoneSpec zone(float lowHz, float highHz, float lowPercent, float highPercent) {
-        return new ZoneSpec(lowHz, highHz, lowPercent, highPercent);
-    }
-
-    private String[] buildPresetCandidates(String devicePresetKey, String presetMode) {
-        if (devicePresetKey == null || devicePresetKey.isEmpty()) {
-            return new String[0];
-        }
-
-        if (PRESET_BASS.equals(presetMode)) {
-            return new String[]{
-                    devicePresetKey + "_bass",
-                    devicePresetKey + "-bass",
-                    devicePresetKey + "_bass_heavy",
-                    devicePresetKey + "-bass-heavy",
-                    "bass_" + devicePresetKey,
-                    "bass-" + devicePresetKey,
-                    "bass_heavy_" + devicePresetKey,
-                    "bass-heavy-" + devicePresetKey
-            };
-        }
-
-        return new String[]{
-                devicePresetKey,
-                devicePresetKey + "_vocal",
-                devicePresetKey + "-vocal",
-                devicePresetKey + "_vocal_heavy",
-                devicePresetKey + "-vocal-heavy",
-                "vocal_" + devicePresetKey,
-                "vocal-" + devicePresetKey,
-                "vocal_heavy_" + devicePresetKey,
-                "vocal-heavy-" + devicePresetKey
-        };
-    }
-
     private static String presetKeyForDevice(int device) {
         switch (device) {
-            case DeviceProfile.DEVICE_NP1:
-                return "np1";
-            case DeviceProfile.DEVICE_NP2:
-                return "np2";
-            case DeviceProfile.DEVICE_NP2A:
-                return "np2a";
-            case DeviceProfile.DEVICE_NP3A:
-                return "np3a";
-            case DeviceProfile.DEVICE_NP4A:
-                return "np4a";
-            default:
-                return null;
+            case DeviceProfile.DEVICE_NP1:  return "np1";
+            case DeviceProfile.DEVICE_NP2:  return "np2";
+            case DeviceProfile.DEVICE_NP2A: return "np2a";
+            case DeviceProfile.DEVICE_NP3A: return "np3a";
+            case DeviceProfile.DEVICE_NP4A: return "np4a";
+            default: return null;
         }
     }
 
     private static String phoneModelForDevice(int device) {
         switch (device) {
-            case DeviceProfile.DEVICE_NP1:
-                return PHONE_MODEL_PHONE1;
-            case DeviceProfile.DEVICE_NP2:
-                return PHONE_MODEL_PHONE2;
-            case DeviceProfile.DEVICE_NP2A:
-                return PHONE_MODEL_PHONE2A;
-            case DeviceProfile.DEVICE_NP3A:
-                return PHONE_MODEL_PHONE3A;
-            case DeviceProfile.DEVICE_NP4A:
-                return PHONE_MODEL_PHONE4A;
-            default:
-                return PHONE_MODEL_UNKNOWN;
+            case DeviceProfile.DEVICE_NP1:  return PHONE_MODEL_PHONE1;
+            case DeviceProfile.DEVICE_NP2:  return PHONE_MODEL_PHONE2;
+            case DeviceProfile.DEVICE_NP2A: return PHONE_MODEL_PHONE2A;
+            case DeviceProfile.DEVICE_NP3A: return PHONE_MODEL_PHONE3A;
+            case DeviceProfile.DEVICE_NP4A: return PHONE_MODEL_PHONE4A;
+            default: return PHONE_MODEL_UNKNOWN;
         }
     }
 
@@ -1353,7 +1105,6 @@ public class AudioCaptureService extends Service {
         }
         return output.toString(StandardCharsets.UTF_8.name());
     }
-
     private static void closeQuietly(Closeable closeable) {
         if (closeable == null) {
             return;

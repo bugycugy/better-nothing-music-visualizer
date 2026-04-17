@@ -53,6 +53,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.Font
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Info
@@ -77,7 +81,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -492,7 +495,6 @@ class MainActivity : ComponentActivity() {
 // ─── Root app composable ──────────────────────────────────────────────────────
 
 @Composable
-@Composable
 private fun BetterVizApp(
     tab: Tab,
     onTabSelected: (Tab) -> Unit,
@@ -574,7 +576,6 @@ private fun BetterVizApp(
                         onLatencyChanged = onLatencyChanged,
                         latencyPresets = latencyPresets,
                         onLatencyPresetsChanged = onLatencyPresetsChanged,
-                        onToggleVisualizer = onToggleVisualizer,
                     )
 
                     Tab.Glyphs -> GlyphsScreen(
@@ -596,20 +597,17 @@ private fun BetterVizApp(
 
 @Composable
 private fun AudioScreen(
-    contentPadding: PaddingValues,
     isRunning: Boolean,
     latencyMs: Int,
     onLatencyChanged: (Int) -> Unit,
     latencyPresets: List<Int>,
     onLatencyPresetsChanged: (List<Int>) -> Unit,
-    onToggleVisualizer: () -> Unit,
 ) {
     val scrollState = rememberScrollState()
     Column(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
-            .padding(contentPadding)
             .padding(horizontal = 28.dp, vertical = 28.dp)
             .verticalScroll(scrollState),
         verticalArrangement = Arrangement.spacedBy(24.dp),
@@ -643,7 +641,6 @@ private fun AudioScreen(
 
 @Composable
 private fun GlyphsScreen(
-    contentPadding: PaddingValues,
     gammaValue: Float,
     onGammaChanged: (Float) -> Unit,
     presets: List<AudioCaptureService.PresetInfo>,
@@ -661,7 +658,6 @@ private fun GlyphsScreen(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
-            .padding(contentPadding)
             .padding(horizontal = 28.dp, vertical = 28.dp)
             .verticalScroll(scrollState),
         verticalArrangement = Arrangement.spacedBy(20.dp),
@@ -723,13 +719,12 @@ private fun GlyphsScreen(
 }
 
 @Composable
-private fun AboutScreen(contentPadding: PaddingValues) {
+private fun AboutScreen() {
     val scrollState = rememberScrollState()
     Column(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
-            .padding(contentPadding)
             .padding(horizontal = 28.dp, vertical = 28.dp)
             .verticalScroll(scrollState),
         verticalArrangement = Arrangement.spacedBy(22.dp),
