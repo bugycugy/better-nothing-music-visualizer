@@ -33,6 +33,8 @@ Currently these models are supported:
   
 **In development:**
 - *Nothing Phone (4a)*
+
+** Coming soon: **
 - *Nothing Phone (4a pro)*
 
 ## <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/2049_fe0f/512.gif" alt="⁉" width="32" height="32"> What does this do ?
