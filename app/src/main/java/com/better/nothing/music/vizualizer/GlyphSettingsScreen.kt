@@ -143,10 +143,10 @@ fun GammaCard(
                 modifier = Modifier.align(Alignment.CenterHorizontally),
             )
             ExpressiveSlider(
-                modifier      = Modifier.fillMaxWidth(),
-                value         = gammaValue,
+                value = gammaValue,
                 onValueChange = onGammaChanged,
-                valueRange    = 0.4f..3.5f,
+                valueRange = 0.4f..3.5f,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
     }

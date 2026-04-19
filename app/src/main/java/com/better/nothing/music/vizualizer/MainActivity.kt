@@ -1,7 +1,6 @@
 package com.better.nothing.music.vizualizer
 
 import android.Manifest
-import android.app.Activity
 import android.app.Application
 import android.content.ComponentName
 import android.content.Intent
@@ -32,7 +31,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -86,10 +84,20 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     // ── Latency ───────────────────────────────────────────────────────────────
     private val _latencyMs = MutableStateFlow(0)
     val latencyMs = _latencyMs.asStateFlow()
-    fun setLatencyMs(value: Int) { _latencyMs.value = value }
 
-    private val _latencyPresets = MutableStateFlow(listOf(10, 154, 300))
+    private val _latencyPresets = MutableStateFlow(listOf(0, 150, 300, 500))
     val latencyPresets = _latencyPresets.asStateFlow()
+
+    /**
+     * Updates the current system latency and persists it to disk.
+     */
+    fun setLatencyMs(value: Int) {
+        _latencyMs.value = value
+        viewModelScope.launch(Dispatchers.IO) {
+            AudioCaptureService.saveLatencyCompensationMs(ctx, selectedDevice.value, value)
+        }
+    }
+
 
     // ── Gamma ─────────────────────────────────────────────────────────────────
     private val _gammaValue = MutableStateFlow(AudioCaptureService.DEFAULT_GAMMA)
@@ -122,28 +130,26 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
             }
             selectedDevice.value = device
 
-            // Four independent SharedPreferences reads — run concurrently on IO.
-            val gamma:   Float
-            val latency: Int
-            val presets: List<Int>
-            val infos:   List<AudioCaptureService.PresetInfo>
-
+            // Load data in parallel
             withContext(Dispatchers.IO) {
                 val gammaD   = async { AudioCaptureService.loadGamma(ctx) }
                 val latencyD = async { AudioCaptureService.loadLatencyCompensationMs(ctx, device) }
                 val presetsD = async { AudioCaptureService.loadLatencyPresets(ctx) }
                 val infosD   = async { AudioCaptureService.loadPresetInfos(ctx, device) }
-                // All four execute in parallel; awaitAll is implicit via individual awaits.
-                gamma   = gammaD.await()
-                latency = latencyD.await()
-                presets = presetsD.await()
-                infos   = infosD.await()
+
+                // Assign values to flows on the Main thread after awaiting
+                val g = gammaD.await()
+                val l = latencyD.await()
+                val p = presetsD.await()
+                val i = infosD.await()
+
+                withContext(Dispatchers.Main) {
+                    _gammaValue.value = g
+                    _latencyMs.value = l
+                    _latencyPresets.value = p
+                    commitPresetInfos(i)
+                }
             }
-            // withContext resumes on the parent dispatcher (Main) — safe to write flows.
-            _gammaValue.value     = gamma
-            _latencyMs.value      = latency
-            _latencyPresets.value = presets
-            commitPresetInfos(infos)
 
             startRunningStatePoller()
         }

@@ -18,11 +18,16 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -78,6 +83,7 @@ fun AudioScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LatencyCard(
     latencyMs: Int,
@@ -85,95 +91,84 @@ fun LatencyCard(
     latencyPresets: List<Int>,
     onLatencyPresetsChanged: (List<Int>) -> Unit,
 ) {
-    var isEditingPresets by remember { mutableStateOf(false) }
-
-    // SnapshotStateList: zero allocations during editing; mutations are tracked
-    // by Compose without replacing the whole list reference.
-    val editingPresets = remember { SnapshotStateList<String>() }
+    // Identify which button is currently "active" by its value
+    val selectedIndex = latencyPresets.indexOf(latencyMs)
 
     Card(
-        shape    = RoundedCornerShape(28.dp),
-        colors   = CardDefaults.cardColors(containerColor = Color(0xFF242222)),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF242222)),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+            Text(
+                text = "Latency Compensation",
+                color = Color(0xFFE6E1E3),
+                style = MaterialTheme.typography.titleMedium,
+            )
+
+            // Native M3 Connected Button Group
+            SingleChoiceSegmentedButtonRow(
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    text  = "Latency adjust :",
-                    color = Color(0xFFE6E1E3),
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (!isEditingPresets) {
-                        latencyPresets.forEach { preset ->
-                            NativeFilterChip(
-                                label    = "${preset}ms",
-                                selected = latencyMs == preset,
-                                onClick  = { onLatencyChanged(preset) },
+                latencyPresets.forEachIndexed { index, preset ->
+                    SegmentedButton(
+                        shape = SegmentedButtonDefaults.itemShape(
+                            index = index,
+                            count = latencyPresets.size
+                        ),
+                        onClick = { onLatencyChanged(preset) },
+                        selected = index == selectedIndex,
+                        // Customizing colors to match your dark theme
+                        colors = SegmentedButtonDefaults.colors(
+                            activeContainerColor = Color(0xFF403F44),
+                            activeContentColor = Color(0xFFB5F2B6),
+                            inactiveContainerColor = Color(0xFF1C1B1B),
+                            inactiveContentColor = Color(0xFFE6E1E3)
+                        ),
+                        label = {
+                            Text(
+                                text = "${preset}ms",
+                                style = MaterialTheme.typography.labelMedium
                             )
-                        }
-                        Button(
-                            onClick = {
-                                editingPresets.clear()
-                                editingPresets.addAll(latencyPresets.map { it.toString() })
-                                isEditingPresets = true
-                            },
-                            modifier        = Modifier.height(36.dp),
-                            colors          = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF403F44),
-                                contentColor   = Color(0xFFE6E0EB)
-                            ),
-                            contentPadding  = PaddingValues(4.dp),
-                        ) {
-                            Text("Edit", style = MaterialTheme.typography.labelSmall)
-                        }
-                    } else {
-                        editingPresets.forEachIndexed { index, value ->
-                            OutlinedTextField(
-                                value         = value,
-                                onValueChange = { editingPresets[index] = it },
-                                modifier      = Modifier.width(60.dp).height(40.dp),
-                                textStyle     = TextStyle(fontSize = 12.sp),
-                                singleLine    = true,
-                            )
-                        }
-                        Button(
-                            onClick = {
-                                try {
-                                    val newPresets = editingPresets
-                                        .mapNotNull { it.toIntOrNull() }
-                                        .filter { it in 0..300 }
-                                    if (newPresets.isNotEmpty()) onLatencyPresetsChanged(newPresets)
-                                } finally {
-                                    isEditingPresets = false
-                                }
-                            },
-                            modifier       = Modifier.height(36.dp),
-                            colors         = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFFB5F2B6),
-                                contentColor   = Color(0xFF1C5A21)
-                            ),
-                            contentPadding = PaddingValues(8.dp),
-                        ) {
-                            Text("Save", style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
+                        },
+                        icon = {} // Removing the checkmark for a cleaner look
+                    )
                 }
             }
 
-            ExpressiveSlider(
-                modifier   = Modifier.fillMaxWidth(),
-                value      = latencyMs.toFloat(),
-                onValueChange = { onLatencyChanged(it.toInt()) },
-                valueRange = 0f..300f,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ExpressiveSlider(
+                    value = latencyMs.toFloat(),
+                    onValueChange = { newValue ->
+                        val intValue = newValue.toInt()
+
+                        // 1. Update the engine immediately
+                        onLatencyChanged(intValue)
+
+                        // 2. Update the specific preset slot and auto-sort
+                        val updatedList = latencyPresets.toMutableList()
+
+                        // If current value isn't a preset, update the one that WAS selected
+                        val indexToUpdate = if (selectedIndex != -1) selectedIndex else 0
+                        updatedList[indexToUpdate] = intValue
+
+                        // 3. Emit the sorted list back to the ViewModel/Persistence
+                        onLatencyPresetsChanged(updatedList.sorted())
+                    },
+                    valueRange = 0f..500f,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                Text(
+                    text = "${latencyMs}ms",
+                    color = Color(0xFFB5F2B6),
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+            }
         }
     }
 }

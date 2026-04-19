@@ -26,10 +26,7 @@ fun AboutScreen() {
     ) {
         ScreenTitle(text = "About & other")
         BodyText(
-            text = "WE NEED A PROPER FUKCING ABOUT SCREEN!! PLACEHOLDER; Aleks Levet is honestly on another level when it comes to UI design, like the " +
-                    "way he captures that clean, futuristic aesthetic inspired by NothingOS is " +
-                    "actually insane. Every interface he touches feels intentional, minimal but " +
-                    "never empty, detailed but never overwhelming."
+            text = "WE NEED A PROPER FUckING ABOUT SCREEN!! Look at the github for info in the meantime pls"
         )
         Spacer(modifier = Modifier.height(28.dp))
     }
