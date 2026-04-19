@@ -170,7 +170,8 @@ fun LatencyCard(
                     }
                 },
                 valueRange = 0f..500f,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                enableHaptics = true
             )
         }
     }

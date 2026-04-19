@@ -1,5 +1,6 @@
 package com.better.nothing.music.vizualizer
 
+import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.EaseInOutCubic
@@ -47,13 +48,16 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -241,14 +245,32 @@ fun ExpressiveSlider(
     value: Float,
     onValueChange: (Float) -> Unit,
     valueRange: ClosedFloatingPointRange<Float>,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    enableHaptics: Boolean = false
 ) {
     // Must be remembered — a new object every recompose breaks press tracking.
     val interactionSource = remember { MutableInteractionSource() }
+    val view = LocalView.current
+
+    // Track the previous value to detect changes
+    val previousValue = remember { mutableStateOf(value) }
 
     Slider(
         value             = value,
-        onValueChange     = onValueChange,
+        onValueChange     = { newValue ->
+            onValueChange(newValue)
+
+            // Trigger haptic feedback if enabled
+            if (enableHaptics) {
+                val change = kotlin.math.abs(newValue - previousValue.value)
+                if (change >= 1f) { // Only trigger for changes >= 1ms to avoid excessive feedback
+                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                    previousValue.value = newValue
+                }
+            } else {
+                previousValue.value = newValue
+            }
+        },
         valueRange        = valueRange,
         interactionSource = interactionSource,
         modifier          = modifier.height(48.dp),
@@ -275,6 +297,13 @@ fun ExpressiveSlider(
             )
         }
     )
+
+    // Update the previous value on initial composition
+    LaunchedEffect(value) {
+        if (previousValue.value != value) {
+            previousValue.value = value
+        }
+    }
 }
 
 val NDotFontFamily = FontFamily(
