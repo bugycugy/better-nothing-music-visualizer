@@ -14,7 +14,7 @@ Even if it technically isn’t, the visual response to music just isn’t very o
 | **Frame Rate** | ~25 FPS | **60 FPS** |
 | **Precision** | Feels random, it's hard to acually see how it's synced | **Uses FFT analysis to precisely determine the intensity of each light** |
 | **Zones** | Standard, full physical glyphs are used | **Each glyph segment and sub-zone is used and controlled independently** |
-| **Visualisation method** | Real-time only | **Realtime with 20ms latency, or pre-processed audio files** |
+| **Visualisation method** | Real-time only | **Realtime with down to 20ms latency, or pre-processed audio files** |
 
 ## <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f3ac/512.gif" alt="🎬" width="40" height=""> [Video demos and examples](https://github.com/Aleks-Levet/better-nothing-music-visualizer/blob/main/Demo-video-examples.md)
 
@@ -22,11 +22,11 @@ Even if it technically isn’t, the visual response to music just isn’t very o
 
 ## 📲 Supported Nothing Phone Models
 Currently these models are supported:
-- Nothing phone (1)
+- Nothing phone (1) 
+  - Needs glyph debug mode **ON** for the app, set through an *ADB command*: `adb shell settings put global nt_glyph_interface_debug_enable 1`. This will be fixed once nNothing gives us their API key.
 - Nothing phone (2)
 - Nothing phone (2a)
 - Nothing phone (2a plus)
-- Nothing phone (3)
 - Nothing phone (3a)
 - Nothing phone (3a pro)
 - *Nothing phone (3)* **(beta, not good yet)**
@@ -37,37 +37,24 @@ Currently these models are supported:
 ** Coming soon: **
 - *Nothing Phone (4a pro)*
 
-## <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/2049_fe0f/512.gif" alt="⁉" width="32" height="32"> What does this do ?
-`musicViz.py` takes an audio file (such as `.mp3`, `.m4a`, or `.ogg`), generates a `.nglyph` file containing the Glyph animations, then runs the generated file through [*SebiAi’s GlyphModder*](https://github.com/SebiAi/custom-nothing-glyph-tools/) to create a **better music visualisation on Nothing phones**!
-It then outputs a **glyphed OGG** file for playback in *Glyph Composer*, *Glyphify* or other glyph ringtone players. (A proper Nothing glyph music player app is in the works by the way!)
 
 ### <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/2699_fe0f/512.gif" alt="⚙" width="25" height="25"> How it works (technically)
+- A high quality audio stream is captured
 - **FFT (Fast Fourier Transform)** is used to analyze frequencies in a **20 ms window** for each **16.666 ms frame** (60 FPS), making the visualization more accurate
-- **Frequency ranges** can be defined in `zones.config` and are fully customizable
+- **Frequency ranges** for each glyph zone are defined in `zones.config` and are fully customizable.
 - The **brightness** of each glyph is defined by the **peak magnitude** found in its assigned frequency range  
   This measures how loud different frequency “zones” are
-- **Downward-only smoothing** is applied to make the animation smoother while preserving responsiveness
-- A `.nglyph` file is generated containing all brightness data  
-  (see the [NGlyph Format](https://github.com/SebiAi/custom-nothing-glyph-tools/blob/main/docs/10_The%20NGlyph%20File%20Format.md))
-- **SebiAi’s** `GlyphModder.py` converts the `.nglyph` file into a **glyphed `.ogg` ringtone** playable on **Nothing Phones**, containing both:
-  - The audio
-  - The synchronized Glyph animation
+- **Downward-only smoothing** is applied to make the animation smoother while preserving responsiveness (this is the secret sauce)
+- Then it's ready to be displayed on the glyphs!
 
-## 📖 How to use?
-The usage is pretty simple and straightforward. Nevertheless, we made a detailed wiki page which explains the installation, usage, configuration files in detail and a troubleshooting section. You can also find out how to make new presets. [Just click here to see how to use **musicViz.py** as a python script](https://github.com/Aleks-Levet/better-nothing-music-visualizer/wiki/). You know what's cool? You can convert an unlimited number of files in bulk without any trouble!
+## 📖 How to use new app?
+Well, find out by yourself, because the readme isn't ready yet hehe (sorry)
 
-### <img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Objects/Musical%20Notes.png" alt="Musical Notes" width="30" height="30" /> Our Music App (coming soon):
-We are also working on a potential **Music Player App** that can easily run the script on any audio file for you! The best part? It's very simple to use, you just need your phone and don't need to process it manually! (this is different than what you can see at the top of the readme file.) 
-
-**Planned features of the app:**
-- Nothing aesthetic
-- simple and fast
-- Switch between multiple music visualisation presets with 2 taps
-- fully offline (on device processing)
-- Intuitive
+## 📖 How to use the python script?
+The usage is pretty simple and straightforward. Nevertheless, we made a detailed wiki page which explains the installation, usage, configuration files in detail and a troubleshooting section. You can also find out how to make new presets(not yet tho). [Just click here to see how to use **musicViz.py** as a python script](https://github.com/Aleks-Levet/better-nothing-music-visualizer/wiki/). You know what's cool? You can convert an unlimited number of files in bulk without any trouble!
 
 ## <img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Hand%20gestures/Handshake.png" alt="Handshake" width="25" height="25" /> Join our community
-You want to talk or discuss? Bugs, feature requests? [Feel free to jump in and join us in the official discord thread in the Nothing server!](https://discord.com/channels/930878214237200394/1434923843239280743)
+You want to talk or discuss? *Bugs, feature requests?* [**Feel free to jump in and join us in the official discord thread in the Nothing server!**](https://discord.com/channels/930878214237200394/1434923843239280743)
 
 ## 🏗️ Contributing
 Come and help us! Contributions are very welcome!
