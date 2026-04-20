@@ -1,5 +1,6 @@
 package com.better.nothing.music.vizualizer;
 
+import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -10,7 +11,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.media.AudioAttributes;
+import android.media.AudioDeviceInfo;
 import android.media.AudioFormat;
+import android.media.AudioManager;
 import android.media.AudioPlaybackCaptureConfiguration;
 import android.media.AudioRecord;
 import android.media.projection.MediaProjection;
@@ -23,6 +26,7 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.SystemClock;
 
+import androidx.annotation.RequiresPermission;
 import androidx.core.app.NotificationCompat;
 
 import com.nothing.ketchum.Common;
@@ -45,7 +49,6 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -88,8 +91,8 @@ public class AudioCaptureService extends Service {
     private static final int SAMPLE_RATE = 44100;
     private static final int FPS = 60;
     private static final int HOP = Math.round(SAMPLE_RATE / (float) FPS);
-    private static final int ANALYSIS_WINDOW = roundHalfEvenToInt(SAMPLE_RATE * 0.025d);
-    private static final int FFT_SIZE = nextPowerOfTwo(ANALYSIS_WINDOW);
+    private static final int ANALYSIS_WINDOW = roundHalfEvenToInt();
+    private static final int FFT_SIZE = nextPowerOfTwo();
     private static final float HZ_PER_BIN = (float) SAMPLE_RATE / FFT_SIZE;
 
     private static final float PEAK_FALLOFF = 0.9995f;
@@ -395,90 +398,150 @@ public class AudioCaptureService extends Service {
         super.onDestroy();
     }
 
+    @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     public void startCapture(int resultCode, Intent data) {
         if (mCapturing) {
             stopCapture();
         }
+
         if (mVisualizerConfig == null) {
             Log.e(TAG, "Cannot start capture without a parsed zones.config preset");
             sIsRunning = false;
             return;
         }
 
-        MediaProjectionManager pm =
-                (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+        MediaProjectionManager pm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
         if (pm == null) {
             Log.e(TAG, "MediaProjectionManager is null");
             sIsRunning = false;
             return;
         }
-        
+
         mProjection = pm.getMediaProjection(resultCode, data);
         if (mProjection == null) {
             Log.e(TAG, "Null projection - user likely denied screen capture permission");
             sIsRunning = false;
             return;
         }
-        
+
         mProjection.registerCallback(new MediaProjection.Callback() {
             @Override
             public void onStop() {
-                Log.d(TAG, "MediaProjection stopped");
+                Log.d(TAG, "MediaProjection stopped externally");
                 stopCapture();
                 stopSelf();
             }
         }, mHandler);
 
         mCapturing = true;
-        mExecutor = Executors.newSingleThreadExecutor();
-        mExecutor.submit(this::captureLoop);
         sIsRunning = true;
-        Log.d(TAG, "startCapture OK - capture loop started");
+
+        // PERF FIX: Move all heavy initialization to the background thread
+        mExecutor = Executors.newSingleThreadExecutor();
+        mExecutor.submit(() -> {
+            try {
+                initGlyphManagerOnDemand();
+
+                // 1. Give the system a moment to register the MediaProjection permission
+                Thread.sleep(500);
+
+                // 2. Build the config ONLY after the sleep
+                AudioPlaybackCaptureConfiguration cfg = new AudioPlaybackCaptureConfiguration.Builder(mProjection)
+                        .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+                        .addMatchingUsage(AudioAttributes.USAGE_GAME)
+                        .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+                        .build();
+
+                // 3. Build and Start
+                mAudioRecord = new AudioRecord.Builder()
+                        .setAudioPlaybackCaptureConfig(cfg)
+                        .setAudioFormat(new AudioFormat.Builder()
+                                .setSampleRate(SAMPLE_RATE)
+                                .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+                                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                                .build())
+                        .setBufferSizeInBytes(FFT_SIZE * 4)
+                        .build();
+
+                mAudioRecord.startRecording();
+
+                // 4. Final Verification
+                Log.d(TAG, "AudioRecord State: " + mAudioRecord.getRecordingState()); // Should be 3
+
+                captureLoop();
+            } catch (Exception e) {
+                Log.e(TAG, "Bootstrapping failed", e);
+            }
+        });
+
+        Log.d(TAG, "startCapture OK - initialization and loop dispatched to background");
     }
 
     public void stopCapture() {
         Log.d(TAG, "stopCapture() called, mCapturing=" + mCapturing);
         mCapturing = false;
         sIsRunning = false;
-        Log.d(TAG, "Stopped recording flags");
-        
-        if (mAudioRecord != null) {
-            Log.d(TAG, "Releasing AudioRecord");
-            AudioRecord audioRecord = mAudioRecord;
-            mAudioRecord = null;
-            try {
-                audioRecord.stop();
-                Log.d(TAG, "AudioRecord stopped");
-            } catch (Exception ignored) {
-                Log.w(TAG, "Exception stopping AudioRecord: " + ignored.getMessage());
-            }
-            audioRecord.release();
-            Log.d(TAG, "AudioRecord released");
-        }
-        
-        if (mProjection != null) {
-            Log.d(TAG, "Stopping MediaProjection");
-            MediaProjection projection = mProjection;
-            mProjection = null;
-            projection.stop();
-            Log.d(TAG, "MediaProjection stopped");
-        }
-        
+
+        // 1. Shut down the loop immediately to stop audio/glyph calls
         if (mExecutor != null) {
             Log.d(TAG, "Shutting down executor");
-            ExecutorService executor = mExecutor;
+            mExecutor.shutdownNow();
             mExecutor = null;
-            executor.shutdownNow();
-            Log.d(TAG, "Executor shut down");
         }
-        
-        Log.d(TAG, "Resetting visualizer state");
+
+        // 2. Release AudioRecord
+        if (mAudioRecord != null) {
+            try {
+                mAudioRecord.stop();
+            } catch (Exception ignored) {}
+            mAudioRecord.release();
+            mAudioRecord = null;
+        }
+
+        // 3. Stop MediaProjection
+        if (mProjection != null) {
+            mProjection.stop();
+            mProjection = null;
+        }
+
+        // 4. Glyph Manager Cleanup: Turn off and UN-INIT to free resources
+        if (mGM != null) {
+            try {
+                turnOffGlyphsManually();
+                if (mSessionOpen) {
+                    mGM.closeSession();
+                    mSessionOpen = false;
+                }
+                mGM.unInit(); // Completely release Nothing SDK resources
+                mGM = null;
+                Log.d(TAG, "GlyphManager uninitialized and cleared");
+            } catch (Exception e) {
+                Log.w(TAG, "Error during GlyphManager cleanup", e);
+            }
+        }
+
         resetVisualizerState();
-        mHandler.post(() -> {
-            Log.d(TAG, "Turning off glyphs");
-            turnOffGlyphsManually();
-        });
         Log.d(TAG, "stopCapture complete");
+    }
+
+    /**
+     * Heavy initialization moved to background thread to avoid UI jank.
+     */
+    private void initGlyphManagerOnDemand() {
+        if (mGM == null) {
+            Log.d(TAG, "Initializing GlyphManager SDK...");
+            mGM = GlyphManager.getInstance(getApplicationContext());
+            mGM.init(mGlyphCallback);
+
+            // Open the session now that we are actually starting capture
+            try {
+                mGM.openSession();
+                mSessionOpen = true;
+                Log.d(TAG, "Glyph session opened successfully");
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to open Glyph session", e);
+            }
+        }
     }
 
     private void turnOffGlyphsManually() {
@@ -514,11 +577,12 @@ public class AudioCaptureService extends Service {
             case DeviceProfile.DEVICE_NP2 -> 33;
             case DeviceProfile.DEVICE_NP2A -> 26;
             case DeviceProfile.DEVICE_NP3A -> 36;
-            case DeviceProfile.DEVICE_NP4A -> 6;
+            case DeviceProfile.DEVICE_NP4A -> 7;
             default -> 0;
         };
     }
 
+    @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     private void captureLoop() {
         if (mVisualizerConfig == null) {
             Log.e(TAG, "captureLoop aborted: config missing");
@@ -539,8 +603,23 @@ public class AudioCaptureService extends Service {
                 AudioFormat.ENCODING_PCM_16BIT
         );
 
+        // Inside your Service
+        // 1. Create the matching attributes
+        AudioAttributes audioAttributes = new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                .build();
+
+// 2. Attach attributes to the CONFIG, not the Record Builder
+        AudioPlaybackCaptureConfiguration acfg = new AudioPlaybackCaptureConfiguration.Builder(mProjection)
+                .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+                .addMatchingUsage(AudioAttributes.USAGE_GAME)
+                .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+                .build();
+
+// 3. Build the AudioRecord (without calling setAudioAttributes)
         mAudioRecord = new AudioRecord.Builder()
-                .setAudioPlaybackCaptureConfig(cfg)
+                .setAudioPlaybackCaptureConfig(acfg)
                 .setAudioFormat(new AudioFormat.Builder()
                         .setSampleRate(SAMPLE_RATE)
                         .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
@@ -562,7 +641,7 @@ public class AudioCaptureService extends Service {
             Log.d(TAG, "Capture started using " + initialConfig.presetKey + " with " + initialConfig.zones.length + " zones");
         }
 
-        float[] hann = buildHannWindow(ANALYSIS_WINDOW);
+        float[] hann = buildHannWindow();
         float[] ring = new float[ANALYSIS_WINDOW];
         short[] hop = new short[HOP];
         float[] re = new float[FFT_SIZE];
@@ -582,6 +661,37 @@ public class AudioCaptureService extends Service {
             }
 
             int read = mAudioRecord.read(hop, 0, HOP);
+
+            // 1. Check for API-level errors
+            if (read < 0) {
+                String errorMsg = switch (read) {
+                    case AudioRecord.ERROR_INVALID_OPERATION -> "ERROR_INVALID_OPERATION";
+                    case AudioRecord.ERROR_BAD_VALUE -> "ERROR_BAD_VALUE";
+                    case AudioRecord.ERROR_DEAD_OBJECT -> "ERROR_DEAD_OBJECT";
+                    default -> "Unknown error: " + read;
+                };
+                Log.e("GlyphDebug", "AudioRecord read failed: " + errorMsg);
+            } else if (read > 0) {
+                // 2. Check for "Silent" data (all zeros)
+                short max = 0;
+                long sum = 0;
+                for (int i = 0; i < read; i++) {
+                    short sample = hop[i];
+                    if (Math.abs(sample) > max) max = (short) Math.abs(sample);
+                    sum += Math.abs(sample);
+                }
+                double average = (double) sum / read;
+
+                // Use a counter or timer so you don't spam the logcat 100 times a second
+                if (System.currentTimeMillis() % 1000 < 20) {
+                    Log.d("GlyphDebug", String.format("Read: %d samples | Max Amp: %d | Avg Amp: %.2f", read, max, average));
+
+                    if (max == 0) {
+                        Log.w("GlyphDebug", "DATA IS SILENT! The system is likely blocking the submix.");
+                    }
+                }
+            }
+
             if (read <= 0) {
                 continue;
             }
@@ -600,7 +710,7 @@ public class AudioCaptureService extends Service {
             for (int i = 0; i < ANALYSIS_WINDOW; i++) {
                 re[i] = ring[(rPos + i) % ANALYSIS_WINDOW] * hann[i];
             }
-            fft(re, im, FFT_SIZE);
+            fft(re, im);
 
             for (int k = 0; k <= FFT_SIZE / 2; k++) {
                 mag[k] = (float) Math.sqrt((re[k] * re[k]) + (im[k] * im[k]));
@@ -923,12 +1033,9 @@ public class AudioCaptureService extends Service {
             }
         }
 
-        uniquePairs.sort(new Comparator<>() {
-            @Override
-            public int compare(float[] left, float[] right) {
-                int lowCompare = Float.compare(left[0], right[0]);
-                return lowCompare != 0 ? lowCompare : Float.compare(left[1], right[1]);
-            }
+        uniquePairs.sort((left, right) -> {
+            int lowCompare = Float.compare(left[0], right[0]);
+            return lowCompare != 0 ? lowCompare : Float.compare(left[1], right[1]);
         });
 
         FrequencyRange[] uniqueRanges = new FrequencyRange[uniquePairs.size()];
@@ -1022,7 +1129,7 @@ public class AudioCaptureService extends Service {
         while ((read = input.read(buffer)) != -1) {
             output.write(buffer, 0, read);
         }
-        return output.toString(StandardCharsets.UTF_8.name());
+        return output.toString(StandardCharsets.UTF_8);
     }
     private static void closeQuietly(Closeable closeable) {
         if (closeable == null) {
@@ -1065,30 +1172,30 @@ public class AudioCaptureService extends Service {
         }
     }
 
-    private static float[] buildHannWindow(int size) {
-        float[] hann = new float[size];
-        for (int i = 0; i < size; i++) {
-            hann[i] = 0.5f * (1f - (float) Math.cos((2d * Math.PI * i) / size));
+    private static float[] buildHannWindow() {
+        float[] hann = new float[AudioCaptureService.ANALYSIS_WINDOW];
+        for (int i = 0; i < AudioCaptureService.ANALYSIS_WINDOW; i++) {
+            hann[i] = 0.5f * (1f - (float) Math.cos((2d * Math.PI * i) / AudioCaptureService.ANALYSIS_WINDOW));
         }
         return hann;
     }
 
-    private static int roundHalfEvenToInt(double value) {
-        return (int) Math.rint(value);
+    private static int roundHalfEvenToInt() {
+        return (int) Math.rint(1102.5);
     }
 
-    private static int nextPowerOfTwo(int value) {
+    private static int nextPowerOfTwo() {
         int power = 1;
-        while (power < value) {
+        while (power < AudioCaptureService.ANALYSIS_WINDOW) {
             power <<= 1;
         }
         return power;
     }
 
-    private static void fft(float[] re, float[] im, int n) {
+    private static void fft(float[] re, float[] im) {
         int j = 0;
-        for (int i = 1; i < n; i++) {
-            int bit = n >> 1;
+        for (int i = 1; i < AudioCaptureService.FFT_SIZE; i++) {
+            int bit = AudioCaptureService.FFT_SIZE >> 1;
             while ((j & bit) != 0) {
                 j ^= bit;
                 bit >>= 1;
@@ -1105,12 +1212,12 @@ public class AudioCaptureService extends Service {
             }
         }
 
-        for (int len = 2; len <= n; len <<= 1) {
+        for (int len = 2; len <= AudioCaptureService.FFT_SIZE; len <<= 1) {
             double angle = (-2d * Math.PI) / len;
             float wr = (float) Math.cos(angle);
             float wi = (float) Math.sin(angle);
 
-            for (int i = 0; i < n; i += len) {
+            for (int i = 0; i < AudioCaptureService.FFT_SIZE; i += len) {
                 float cr = 1f;
                 float ci = 0f;
                 for (int k = 0; k < len / 2; k++) {
@@ -1410,5 +1517,38 @@ public class AudioCaptureService extends Service {
         }
 
         return PHONE_MODEL_UNKNOWN;
+    }
+    public String getCurrentDeviceName() {
+        AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        AudioDeviceInfo[] outputs = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS);
+
+        AudioDeviceInfo bestDevice = null;
+
+        // Pass 1: Look EXCLUSIVELY for high-fidelity Bluetooth (Music)
+        for (AudioDeviceInfo device : outputs) {
+            if (device.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) {
+                return device.getProductName().toString(); // Return immediately (e.g., "Nothing Ear (open)")
+            }
+        }
+
+        // Pass 2: Look for Wired/USB Headsets
+        for (AudioDeviceInfo device : outputs) {
+            int type = device.getType();
+            if (type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                    type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
+                    type == AudioDeviceInfo.TYPE_USB_HEADSET) {
+                return device.getProductName().toString();
+            }
+        }
+
+        // Pass 3: Fallback to Internal Speaker, but skip the "Earpiece" (Type 1)
+        // and "Telephony" (Type 18) which often carry the A063 label.
+        for (AudioDeviceInfo device : outputs) {
+            if (device.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
+                return "Internal Speaker";
+            }
+        }
+
+        return "Internal Speaker";
     }
 }

@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
@@ -221,7 +222,8 @@ fun NativeBottomBar(
                     Icon(
                         imageVector = when (tab) {
                             Tab.Audio -> Icons.AutoMirrored.Filled.VolumeUp
-                            Tab.Glyphs -> Icons.Filled.Settings
+                            Tab.Glyphs -> Icons.Filled.Settings //we need to change this
+                            Tab.Settings -> Icons.Filled.GraphicEq
                             Tab.About -> Icons.Filled.Info
                         },
                         contentDescription = tab.label

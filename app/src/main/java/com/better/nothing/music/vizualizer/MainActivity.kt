@@ -1,10 +1,14 @@
+//https://docs.google.com/document/d/1yW5VaqSjXN9lqe3_KvuxRvHq3PcurzPr4rwWDfRBJ7U/edit?tab=t.0
+//https://taskweb.pages.dev/?board=mauv5VZ29Gw1vnbExSXb#
 package com.better.nothing.music.vizualizer
 
 import android.Manifest
 import android.app.Application
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.os.IBinder
@@ -15,6 +19,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.annotation.RequiresPermission
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.EaseOut
@@ -58,7 +63,7 @@ import kotlinx.coroutines.withContext
 // Promoted to internal so MainViewModel can reference it without reflection.
 
 enum class Tab(val label: String) {
-    Audio("Audio"), Glyphs("Glyphs"), About("About");
+    Audio("Audio"), Glyphs("Glyphs"), Settings("Settings"), About("About");
 
     companion object {
         // Allocated once at class-load time; never re-allocated during recomposition.
@@ -115,7 +120,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     val runningState = _runningState.asStateFlow()
     fun setRunning(running: Boolean) { _runningState.value = running }
 
-    // ── Presets ───────────────────────────────────────────────────────────────
+    // ── Presets ──────────────────────────────────────────────────────────────
     private val _selectedPreset = MutableStateFlow("")
     val selectedPreset = _selectedPreset.asStateFlow()
     fun currentPreset(): String = _selectedPreset.value
@@ -124,37 +129,47 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     private val _presetInfos = MutableStateFlow<List<AudioCaptureService.PresetInfo>>(emptyList())
     val presetInfos = _presetInfos.asStateFlow()
 
+    // ── Device Memorization ──────────────────────────────────────────────────
+    private val _autoDeviceEnabled = MutableStateFlow(true)
+    val autoDeviceEnabled = _autoDeviceEnabled.asStateFlow()
+
+    private val _connectedDeviceName = MutableStateFlow<String?>(null)
+    val connectedDeviceName = _connectedDeviceName.asStateFlow()
+
+    fun setAutoDeviceEnabled(enabled: Boolean) {
+        _autoDeviceEnabled.value = enabled
+        viewModelScope.launch(Dispatchers.IO) {
+            ctx.getSharedPreferences("viz_prefs", Context.MODE_PRIVATE)
+                .edit().putBoolean("auto_device_enabled", enabled).apply()
+        }
+    }
+
+    fun updateConnectedDevice(name: String?) {
+        _connectedDeviceName.value = name
+    }
+
     // ── Init: all IO in parallel ──────────────────────────────────────────────
 
     init {
-        viewModelScope.launch {
-            // Device detection is CPU work — run on Default.
-            val device = withContext(Dispatchers.Default) {
-                DeviceProfile.detectDevice()
-                    .takeIf { it != DeviceProfile.DEVICE_UNKNOWN }
-                    ?: DeviceProfile.DEVICE_NP2
-            }
+        // Run EVERYTHING heavy off-thread immediately
+        viewModelScope.launch(Dispatchers.Default) {
+            val device = DeviceProfile.detectDevice()
             selectedDevice.value = device
 
-            // Load data in parallel
-            withContext(Dispatchers.IO) {
-                val gammaD   = async { AudioCaptureService.loadGamma(ctx) }
-                val latencyD = async { AudioCaptureService.loadLatencyCompensationMs(ctx, device) }
-                val presetsD = async { AudioCaptureService.loadLatencyPresets(ctx) }
-                val infosD   = async { AudioCaptureService.loadPresetInfos(ctx, device) }
+            // Load I/O in parallel using IO dispatcher
+            launch(Dispatchers.IO) {
+                val gamma = AudioCaptureService.loadGamma(ctx)
+                val latency = AudioCaptureService.loadLatencyCompensationMs(ctx, device)
+                val presets = AudioCaptureService.loadLatencyPresets(ctx)
+                val infos = AudioCaptureService.loadPresetInfos(ctx, device)
 
-                // Assign values to flows on the Main thread after awaiting
-                val g = gammaD.await()
-                val l = latencyD.await()
-                val p = presetsD.await()
-                val i = infosD.await()
-
-                withContext(Dispatchers.Main) {
-                    _gammaValue.value = g
-                    _latencyMs.value = l
-                    _latencyPresets.value = p
-                    commitPresetInfos(i)
-                }
+                // Update UI state once ready
+                _gammaValue.value = gamma
+                _latencyMs.value = latency
+                _latencyPresets.value = presets
+                _presetInfos.value = infos
+                _autoDeviceEnabled.value = ctx.getSharedPreferences("viz_prefs", Context.MODE_PRIVATE)
+                    .getBoolean("auto_device_enabled", true)
             }
 
             startRunningStatePoller()
@@ -171,11 +186,11 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     private fun startRunningStatePoller() {
         viewModelScope.launch(Dispatchers.Default) {
             while (true) {
-                delay(500L)
-                val running = AudioCaptureService.isRunning()
-                // Only emit when the value actually changes — prevents spurious
-                // recompositions from a StateFlow that emits the same value.
-                if (running != _runningState.value) _runningState.value = running
+                delay(1000L) // Polling once per second is enough for a UI label
+                val actual = AudioCaptureService.isRunning()
+                if (_runningState.value != actual) {
+                    _runningState.value = actual
+                }
             }
         }
     }
@@ -239,10 +254,14 @@ class MainActivity : ComponentActivity() {
     private var hasPendingToken = false
 
     private val serviceConnection = object : ServiceConnection {
+        @RequiresPermission(Manifest.permission.RECORD_AUDIO)
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
             Log.d("BetterViz", "Service connected: $name")
             service = (binder as AudioCaptureService.LocalBinder).service
             bound = true
+            viewModel.updateConnectedDevice(service?.getCurrentDeviceName())
+            val detectedName = service?.getCurrentDeviceName()
+            Log.d("VizDebug", "Detected Device: $detectedName") // Check Logcat!
             applyServiceSettings()
             if (hasPendingToken && pendingData != null) {
                 val data = pendingData ?: return
@@ -262,7 +281,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private val projectionLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) @RequiresPermission(
+            Manifest.permission.RECORD_AUDIO
+        ) { result ->
             val data = result.data
             if (result.resultCode == RESULT_OK && data != null) {
                 deliverProjectionToken(result.resultCode, data)
@@ -302,19 +323,20 @@ class MainActivity : ComponentActivity() {
                 val selectedPreset by viewModel.selectedPreset.collectAsStateWithLifecycle()
 
                 BetterVizApp(
-                    tab                     = tab,
-                    onTabSelected           = viewModel::selectTab,
-                    isRunning               = isRunning,
-                    latencyMs               = latencyMs,
-                    onLatencyChanged        = ::onLatencyChanged,
-                    latencyPresets          = latencyPresets,
+                    tab = tab,
+                    onTabSelected = viewModel::selectTab,
+                    isRunning = isRunning,
+                    latencyMs = latencyMs,
+                    onLatencyChanged = ::onLatencyChanged,
+                    latencyPresets = latencyPresets,
                     onLatencyPresetsChanged = viewModel::updateLatencyPresets,
-                    gammaValue              = gammaValue,
-                    onGammaChanged          = ::onGammaChanged,
-                    presets                 = presets,
-                    selectedPreset          = selectedPreset,
-                    onPresetSelected        = ::onPresetSelected,
-                    onToggleVisualizer      = ::toggleVisualizer,
+                    gammaValue = gammaValue,
+                    onGammaChanged = ::onGammaChanged,
+                    presets = presets,
+                    selectedPreset = selectedPreset,
+                    onPresetSelected = ::onPresetSelected,
+                    onToggleVisualizer = ::toggleVisualizer,
+                    viewModel = viewModel,
                 )
             }
         }
@@ -372,7 +394,7 @@ class MainActivity : ComponentActivity() {
     private fun requestProjection() {
         if (ContextCompat.checkSelfPermission(
                 this, Manifest.permission.POST_NOTIFICATIONS
-            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) != PackageManager.PERMISSION_GRANTED
         ) {
             notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             return
@@ -384,6 +406,7 @@ class MainActivity : ComponentActivity() {
         projectionLauncher.launch(projectionManager.createScreenCaptureIntent())
     }
 
+    @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     private fun deliverProjectionToken(resultCode: Int, data: Intent) {
         val serviceIntent = Intent(this, AudioCaptureService::class.java).apply {
             putExtra(AudioCaptureService.EXTRA_PRESET_KEY, viewModel.currentPreset())
@@ -436,6 +459,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun BetterVizApp(
+    viewModel: MainViewModel, // Pass ViewModel to collect new flows
     tab: Tab,
     onTabSelected: (Tab) -> Unit,
     isRunning: Boolean,
@@ -450,49 +474,33 @@ private fun BetterVizApp(
     onPresetSelected: (String) -> Unit,
     onToggleVisualizer: () -> Unit,
 ) {
+    // Collect the new Device states
+    val autoDeviceEnabled by viewModel.autoDeviceEnabled.collectAsStateWithLifecycle()
+    val connectedDeviceName by viewModel.connectedDeviceName.collectAsStateWithLifecycle()
+
     Scaffold(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black),
+        modifier = Modifier.fillMaxSize().background(Color.Black),
         containerColor = Color.Black,
         floatingActionButton = {
-            StartStopButton(
-                running = isRunning,
-                onClick = onToggleVisualizer,
-                modifier = Modifier.padding(bottom = 8.dp, end = 8.dp),
-            )
+            StartStopButton(running = isRunning, onClick = onToggleVisualizer)
         },
-        bottomBar = {
-            NativeBottomBar(
-                selectedTab = tab,
-                onTabSelected = onTabSelected,
-            )
-        },
+        bottomBar = { NativeBottomBar(selectedTab = tab, onTabSelected = onTabSelected) },
     ) { innerPadding ->
-        // We use a Box here to "consume" the Scaffold padding once, 
-        // preventing the AnimatedContent from jittering.
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .background(Color.Black)
-        ) {
+        Box(modifier = Modifier.fillMaxSize().padding(innerPadding).background(Color.Black)) {
             AnimatedContent(
                 targetState = tab,
                 label = "tab_content",
                 transitionSpec = {
                     val isMovingRight = targetState.ordinal > initialState.ordinal
-
                     // Spring physics: No bounce, but very smooth deceleration
                     val springSpec = spring<IntOffset>(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        dampingRatio = Spring.DampingRatioLowBouncy,
                         stiffness = Spring.StiffnessLow
                     )
 
                     // Subtle scale and fade specs
                     val fadeSpec = tween<Float>(durationMillis = 300)
                     val scaleSpec = tween<Float>(durationMillis = 400, easing = EaseOutQuart)
-
                     if (isMovingRight) {
                         (slideInHorizontally(initialOffsetX = { it }, animationSpec = springSpec) +
                                 fadeIn(fadeSpec) +
@@ -515,8 +523,8 @@ private fun BetterVizApp(
                 },
                 modifier = Modifier.fillMaxSize()
             ) { currentTab ->
-                // Inside here, we no longer pass innerPadding down, 
-                // as the parent Box is already handling it.
+// Inside here, we no longer pass innerPadding down,
+// as the parent Box is already handling it.
                 when (currentTab) {
                     Tab.Audio -> AudioScreen(
                         isRunning = isRunning,
@@ -524,15 +532,32 @@ private fun BetterVizApp(
                         onLatencyChanged = onLatencyChanged,
                         latencyPresets = latencyPresets,
                         onLatencyPresetsChanged = onLatencyPresetsChanged,
-                    )
+                        autoDeviceEnabled = autoDeviceEnabled,
+                        onAutoDeviceToggle = viewModel::setAutoDeviceEnabled,
+                        connectedDeviceName = connectedDeviceName,
+                        )
 
-                    Tab.Glyphs -> GlyphsScreen(
-                        gammaValue = gammaValue,
-                        onGammaChanged = onGammaChanged,
-                        presets = presets,
-                        selectedPreset = selectedPreset,
-                        onPresetSelected = onPresetSelected,
-                    )
+                    Tab.Glyphs -> {
+                        // REFINEMENT: Nested AnimatedContent for Preset Swapping
+                        // This fixes the "stuck" animation when changing presets within the tab.
+                        AnimatedContent(
+                            targetState = selectedPreset,
+                            transitionSpec = {
+                                fadeIn(tween(200)) togetherWith fadeOut(tween(200))
+                            },
+                            label = "preset_swap_animation"
+                        ) { targetPreset ->
+                            GlyphsScreen(
+                                gammaValue = gammaValue,
+                                onGammaChanged = onGammaChanged,
+                                presets = presets,
+                                selectedPreset = targetPreset,
+                                onPresetSelected = onPresetSelected,
+                            )
+                        }
+                    }
+
+                    Tab.Settings -> SettingsScreen() // New Branch
 
                     Tab.About -> AboutScreen()
                 }
