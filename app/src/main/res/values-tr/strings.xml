@@ -1,7 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Better Nothing Müzik Görselleştirici</string>
-    <string name="nav_audio">Ses</string>
-    <string name="nav_glyphs">Glifler</string>
-    <string name="nav_about">Hakkında</string>
 </resources>
