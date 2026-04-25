@@ -117,21 +117,25 @@ fun NativeFilterChip(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
+    val haptics = LocalHapticFeedback.current
     FilterChip(
         selected = selected,
-        onClick  = onClick,
+        onClick  = {
+            haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+            onClick()
+        },
         label    = { Text(text = label, style = MaterialTheme.typography.labelLarge) },
         shape    = RoundedCornerShape(8.dp),
         colors   = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = Color(0xFFDBDBDB),
-            selectedLabelColor     = Color(0xFF000000),
-            containerColor         = Color(0xFF000000),
-            labelColor             = Color(0xFF727272),
+            selectedContainerColor = MaterialTheme.colorScheme.primary,
+            selectedLabelColor     = MaterialTheme.colorScheme.onPrimary,
+            containerColor         = Color.Transparent,
+            labelColor             = MaterialTheme.colorScheme.onSurfaceVariant,
         ),
         border   = FilterChipDefaults.filterChipBorder(
             enabled             = true,
             selected            = selected,
-            borderColor         = Color(0xFF727272),
+            borderColor         = MaterialTheme.colorScheme.outline,
             selectedBorderColor = Color.Transparent,
         ),
     )
@@ -145,6 +149,7 @@ fun StartStopButton(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed         by interactionSource.collectIsPressedAsState()
+    val haptics           = LocalHapticFeedback.current
 
     val scale by animateFloatAsState(
         targetValue   = if (isPressed) 0.9f else 1.1f,
@@ -156,19 +161,22 @@ fun StartStopButton(
     )
 
     val containerColor by animateColorAsState(
-        targetValue   = if (running) Color(0xFFE53935) else Color(0xFFB5F2B6),
+        targetValue   = if (running) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
         animationSpec = tween(600, easing = EaseInOutCubic),
         label         = "containerColor"
     )
 
     val contentColor by animateColorAsState(
-        targetValue   = if (running) Color.White else Color(0xFF1C5A21),
+        targetValue   = if (running) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSecondary,
         animationSpec = tween(600, easing = EaseInOutCubic),
         label         = "contentColor"
     )
 
     FloatingActionButton(
-        onClick           = onClick,
+        onClick           = {
+            haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+            onClick()
+        },
         interactionSource = interactionSource,
         shape             = RoundedCornerShape(15.dp),
         modifier          = modifier
@@ -229,7 +237,11 @@ fun NativeBottomBar(
             val isSelected = tab == selectedTab
             NavigationBarItem(
                 selected = isSelected,
-                onClick = { onTabSelected(tab) },
+                onClick = {
+                    if (!isSelected) {
+                        onTabSelected(tab)
+                    }
+                },
                 label = {
                     Text(
                         text = tab.label,
@@ -337,7 +349,7 @@ fun ExpressiveSlider(
                 trackInsideCornerSize = 2.dp,
                 colors = SliderDefaults.colors(
                     activeTrackColor = MaterialTheme.colorScheme.primary,
-                    inactiveTrackColor = Color(0xFF1C1B1B)
+                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
                 )
             )
         }
@@ -376,27 +388,35 @@ fun BetterVizTheme(content: @Composable () -> Unit) {
 
     val colorScheme = if (isNothingRed) {
         androidx.compose.material3.darkColorScheme(
-            background = Color(0xFF000000),
-            surface = Color(0xFF0A0A0A),
-            primary = Color(0xFFEF4444),
-            secondary = Color(0xFFEF4444),
-            onBackground = Color(0xFFF5F5F5),
-            onSurface = Color(0xFFF5F5F5),
-            onPrimary = Color(0xFF000000),
-            surfaceVariant = Color(0xFF111111),
-            onSecondary = Color(0xFF000000)
+            background = Color.Black,
+            surface = Color(0xFF0D0D0D),
+            primary = Color(0xFFEE0000),    // Authentic Nothing Red
+            secondary = Color(0xFFEE0000),
+            error = Color(0xFFEE0000),
+            onBackground = Color.White,
+            onSurface = Color.White,
+            onPrimary = Color.White,
+            onSecondary = Color.White,
+            onError = Color.White,
+            surfaceVariant = Color(0xFF1A1A1A),
+            onSurfaceVariant = Color(0xFFB3B3B3),
+            outline = Color(0xFF333333)
         )
     } else {
         androidx.compose.material3.darkColorScheme(
             background = Color.Black,
-            surface = Color(0xFF242222),
-            primary = Color(0xFFD8D3DA),
-            secondary = Color(0xFFB5F2B6),
+            surface = Color(0xFF141414),
+            primary = Color(0xFFD8D3DA),    // Silver/White accent
+            secondary = Color(0xFFB5F2B6),  // Nothing Mint Green
+            error = Color(0xFFEE0000),
             onBackground = Color.White,
             onSurface = Color.White,
             onPrimary = Color(0xFF1C1A1D),
-            surfaceVariant = Color(0xFF3D3C41),
-            onSecondary = Color.White
+            onSecondary = Color(0xFF1C5A21),
+            onError = Color.White,
+            surfaceVariant = Color(0xFF242424),
+            onSurfaceVariant = Color(0xFF8C8C8C),
+            outline = Color(0xFF2C2C2C)
         )
     }
 

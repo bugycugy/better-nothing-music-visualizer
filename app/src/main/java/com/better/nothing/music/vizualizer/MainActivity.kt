@@ -64,30 +64,32 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.annotation.RequiresPermission
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.SizeTransform
-import androidx.compose.animation.core.EaseOutQuart
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -713,6 +715,43 @@ private fun BetterVizApp(
     val autoDeviceEnabled by viewModel.autoDeviceEnabled.collectAsStateWithLifecycle()
     val connectedDeviceName by viewModel.connectedDeviceName.collectAsStateWithLifecycle()
     val visibleTabs = rememberVisibleTabs(glyphTabEnabled, hapticsTabEnabled)
+    val haptics = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    var isAnimatingByClick by remember { mutableStateOf(false) }
+
+    val pagerState = rememberPagerState(
+        initialPage = visibleTabs.indexOf(tab).coerceAtLeast(0),
+        pageCount = { visibleTabs.size }
+    )
+
+    // Sync Pager -> ViewModel (Settle only to avoid animation loops)
+    LaunchedEffect(pagerState.settledPage) {
+        val targetTab = visibleTabs.getOrNull(pagerState.settledPage)
+        if (targetTab != null && targetTab != viewModel.selectedTab.value) {
+            onTabSelected(targetTab)
+        }
+    }
+
+    // Snappy UI Feedback: Haptics & Highlight update immediately on crossing
+    LaunchedEffect(pagerState.currentPage) {
+        // Trigger haptic when crossing into a new page, but only for manual swipes.
+        // We check isScrollInProgress to ignore the initial startup trigger.
+        if (pagerState.isScrollInProgress && !isAnimatingByClick) {
+            haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+        }
+    }
+
+    val currentTabForHighlight = remember(pagerState.currentPage, visibleTabs) {
+        visibleTabs.getOrNull(pagerState.currentPage) ?: tab
+    }
+
+    // Sync ViewModel -> Pager (For external state changes)
+    LaunchedEffect(tab) {
+        val targetPage = visibleTabs.indexOf(tab)
+        if (targetPage != -1 && targetPage != pagerState.currentPage) {
+            pagerState.animateScrollToPage(targetPage)
+        }
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize().background(Color.Black),
@@ -722,51 +761,33 @@ private fun BetterVizApp(
         },
         bottomBar = {
             NativeBottomBar(
-                selectedTab = tab,
+                selectedTab = currentTabForHighlight,
                 visibleTabs = visibleTabs,
-                onTabSelected = onTabSelected
+                onTabSelected = { targetTab ->
+                    val index = visibleTabs.indexOf(targetTab)
+                    if (index != -1 && index != pagerState.currentPage) {
+                        haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                        isAnimatingByClick = true
+                        scope.launch {
+                            try {
+                                pagerState.animateScrollToPage(index)
+                            } finally {
+                                isAnimatingByClick = false
+                            }
+                        }
+                    }
+                }
             )
         },
     ) { innerPadding ->
         Box(modifier = Modifier.fillMaxSize().padding(innerPadding).background(Color.Black)) {
-            AnimatedContent(
-                targetState = tab,
-                label = "tab_content",
-                transitionSpec = {
-                    val isMovingRight = targetState.ordinal > initialState.ordinal
-                    // Spring physics: No bounce, but very smooth deceleration
-                    val springSpec = spring<IntOffset>(
-                        dampingRatio = Spring.DampingRatioLowBouncy,
-                        stiffness = Spring.StiffnessLow
-                    )
-
-                    // Subtle scale and fade specs
-                    val fadeSpec = tween<Float>(durationMillis = 300)
-                    val scaleSpec = tween<Float>(durationMillis = 400, easing = EaseOutQuart)
-                    if (isMovingRight) {
-                        (slideInHorizontally(initialOffsetX = { it }, animationSpec = springSpec) +
-                                fadeIn(fadeSpec) +
-                                scaleIn(initialScale = 0.95f, animationSpec = scaleSpec))
-                            .togetherWith(
-                                slideOutHorizontally(targetOffsetX = { -it }, animationSpec = springSpec) +
-                                        fadeOut(fadeSpec) +
-                                        scaleOut(targetScale = 0.95f, animationSpec = scaleSpec)
-                            )
-                    } else {
-                        (slideInHorizontally(initialOffsetX = { -it }, animationSpec = springSpec) +
-                                fadeIn(fadeSpec) +
-                                scaleIn(initialScale = 0.95f, animationSpec = scaleSpec))
-                            .togetherWith(
-                                slideOutHorizontally(targetOffsetX = { it }, animationSpec = springSpec) +
-                                        fadeOut(fadeSpec) +
-                                        scaleOut(targetScale = 0.95f, animationSpec = scaleSpec)
-                            )
-                    }.using(SizeTransform(clip = false))
-                },
-                modifier = Modifier.fillMaxSize()
-            ) { currentTab ->
-// Inside here, we no longer pass innerPadding down,
-// as the parent Box is already handling it.
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+                beyondViewportPageCount = 1,
+                userScrollEnabled = true,
+            ) { pageIndex ->
+                val currentTab = visibleTabs.getOrNull(pageIndex) ?: Tab.Audio
                 when (currentTab) {
                     Tab.Audio -> AudioScreen(
                         isRunning = isRunning,
@@ -777,11 +798,9 @@ private fun BetterVizApp(
                         autoDeviceEnabled = autoDeviceEnabled,
                         onAutoDeviceToggle = onAutoDeviceToggle,
                         connectedDeviceName = connectedDeviceName,
-                        )
+                    )
 
                     Tab.Glyphs -> {
-                        // REFINEMENT: Nested AnimatedContent for Preset Swapping
-                        // This fixes the "stuck" animation when changing presets within the tab.
                         AnimatedContent(
                             targetState = selectedPreset,
                             transitionSpec = {

@@ -2,8 +2,8 @@
 
 ## <img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Travel%20and%20places/Globe%20with%20Meridians.png" alt="Globe" width="25" height="25" /> Read this in other languages: 🇹🇷 [Türkçe](README_TR.md)
 
-## <img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Smilies/Partying%20Face.png" alt="Partying Face" width="25" height="25" /> Important Announcement
-I'm currently working with 2 developers to make an app, a special app that grabs the live audio stream from the android device and directly processes it into the glyphs. It will use the media projection feature, which sounds like a scary permission, but that's the only way to grab a high-quality audio stream from every app. that also means that you'll be able to visualize music playing through spotify, youtube music, and basically any music app you want, which means you don't have to manually process each file or only use local files! So yeah, we're moving from the simple Python script to a nice android app, so it will be way easier to use our algorithm!  
+## <img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Smilies/Partying%20Face.png" alt="Partying Face" width="25" height="25" /> The Android App is here!
+We have successfully moved from the simple Python script to a powerful Android app! It grabs the live audio stream from your device using **Media Projection** and processes it directly into the glyphs. This means you can visualize music from **Spotify, YouTube Music**, and basically any other app without manual processing! No more local files only!
 
 ## <img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Smilies/Thinking%20Face.png" alt="Thinking Face" width="25" height="25" /> Why does this exist?
 For a lot of people (including me), the *stock Glyph Music Visualiastion provided by Nothing* feels random.  
@@ -32,8 +32,6 @@ Currently these models are supported:
 - Nothing phone (3a)
 - Nothing phone (3a pro)
 - *Nothing phone (3)* **(beta, not good yet)**
-  
-**In development:**
 - *Nothing Phone (4a)*
 
 ** Coming soon: **
@@ -49,8 +47,12 @@ Currently these models are supported:
 - **Downward-only smoothing** is applied to make the animation smoother while preserving responsiveness (this is the secret sauce)
 - Then it's ready to be displayed on the glyphs!
 
-## 📖 How to use new app?
-Well, find out by yourself, because the readme isn't ready yet hehe (sorry)
+## 📖 How to use the App?
+1. **Download the latest APK** from the releases.
+2. **Grant Permissions**: The app needs Screen Capture (Media Projection) and Notification access.
+3. **Start Visualizing**: Hit the "Start" button and play music from any app!
+4. **Adjust Latency**: If the lights aren't perfectly synced with your Bluetooth speaker or headphones, use the **Audio** tab to add or remove delay.
+5. **Change Presets**: Explore different visualization styles in the **Glyphs** tab.
 
 ## 📖 How to use the python script?
 The usage is pretty simple and straightforward. Nevertheless, we made a detailed wiki page which explains the installation, usage, configuration files in detail and a troubleshooting section. You can also find out how to make new presets(not yet tho). [Just click here to see how to use **musicViz.py** as a python script](https://github.com/Aleks-Levet/better-nothing-music-visualizer/wiki/). You know what's cool? You can convert an unlimited number of files in bulk without any trouble!
