@@ -176,10 +176,6 @@ fun LatencyCard(
             .map { it.first }
     }
 
-    LaunchedEffect(visualOrder) {
-        haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
-    }
-
     val activeIndex = if (draggingIndex != -1) draggingIndex else latencyPresets.indexOf(latencyMs)
 
     val updateLatency = { newValue: Int ->

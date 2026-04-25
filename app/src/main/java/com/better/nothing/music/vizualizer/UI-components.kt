@@ -288,13 +288,18 @@ fun ExpressiveSlider(
     val isDragged by interactionSource.collectIsDraggedAsState()
     val isActive = isPressed || isDragged
 
-    // Trigger haptic on Press/Release
+    val wasActive = remember { mutableStateOf(false) }
+
+    // Trigger haptic on Press/Release (skip initial state)
     LaunchedEffect(isActive) {
-        if (isActive) {
+        if (!wasActive.value && isActive) {
+            // Trigger on press (transition from false to true)
             haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
-        } else {
+        } else if (wasActive.value && !isActive) {
+            // Trigger on release (transition from true to false)
             haptics.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
         }
+        wasActive.value = isActive
     }
 
     // The "Expressive" factor (1.0 to 1.8)
@@ -307,16 +312,10 @@ fun ExpressiveSlider(
         label = "expressive_bounce"
     )
 
-    val previousValue = remember { mutableIntStateOf(value.toInt()) }
-
     Slider(
         value = value,
         onValueChange = { newValue ->
             onValueChange(newValue)
-            if (enableHaptics && newValue.toInt() != previousValue.intValue) {
-                haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                previousValue.intValue = newValue.toInt()
-            }
         },
         valueRange = valueRange,
         interactionSource = interactionSource,

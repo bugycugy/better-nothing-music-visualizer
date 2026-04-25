@@ -81,6 +81,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -429,8 +430,6 @@ class MainActivity : ComponentActivity() {
                     onPresetSelected = ::onPresetSelected,
                     onToggleVisualizer = ::toggleVisualizer,
                     onAutoDeviceToggle = ::onAutoDeviceToggle,
-                    glyphTabEnabled = glyphTabEnabled,
-                    hapticsTabEnabled = hapticsTabEnabled,
                     viewModel = viewModel,
                 )
             }
@@ -641,29 +640,14 @@ private fun AudioDeviceInfo.toAudioRoute(): AudioRoute {
     )
 }
 
-@Composable
-private fun rememberVisibleTabs(
-    glyphTabEnabled: Boolean,
-    hapticsTabEnabled: Boolean,
-): List<Tab> = remember(glyphTabEnabled, hapticsTabEnabled) {
-    buildList {
-        add(Tab.Audio)
-        if (glyphTabEnabled) add(Tab.Glyphs)
-        if (hapticsTabEnabled) add(Tab.Haptics)
-        add(Tab.Settings)
-        add(Tab.About)
-    }
-}
+// Define the static list outside or as a constant to avoid overhead
+private val Tabs = listOf(Tab.Audio, Tab.Glyphs, Tab.Haptics, Tab.Settings, Tab.About)
 
-// ─── Root app composable ──────────────────────────────────────────────────────
-
-// Define a global Bouncy Spring Spec for that "springy" feel
-// High-quality Spring Spec: Lower stiffness = more "travel" and bounce
 private val BouncySpringSpec = spring<Float>(
     dampingRatio = Spring.DampingRatioLowBouncy,
     stiffness = Spring.StiffnessLow
 )
-@SuppressLint("RestrictedApi")
+
 @Composable
 private fun BetterVizApp(
     viewModel: MainViewModel,
@@ -681,52 +665,44 @@ private fun BetterVizApp(
     onPresetSelected: (String) -> Unit,
     onToggleVisualizer: () -> Unit,
     onAutoDeviceToggle: (Boolean) -> Unit,
-    glyphTabEnabled: Boolean,
-    hapticsTabEnabled: Boolean,
+    // Removed unused toggle params
 ) {
     val autoDeviceEnabled by viewModel.autoDeviceEnabled.collectAsStateWithLifecycle()
     val connectedDeviceName by viewModel.connectedDeviceName.collectAsStateWithLifecycle()
-    val rawVisibleTabs = rememberVisibleTabs(glyphTabEnabled, hapticsTabEnabled)
-
-    // Ghost Logic: Add nulls at the start and end to allow overscroll travel
-    val visibleTabsWithGhosts = remember(rawVisibleTabs) {
-        listOf(null) + rawVisibleTabs + listOf(null)
-    }
 
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
 
     val pagerState = rememberPagerState(
-        // Offset by 1 because of the ghost page at index 0
-        initialPage = (rawVisibleTabs.indexOf(tab) + 1).coerceAtLeast(1),
-        pageCount = { visibleTabsWithGhosts.size }
+        initialPage = Tabs.indexOf(tab).coerceAtLeast(0),
+        pageCount = { Tabs.size }
     )
 
-// 2. Sync Pager -> ViewModel (Logic moved here, removed haptics from here)
-    LaunchedEffect(pagerState.settledPage) {
-        if (pagerState.settledPage == 0) {
-            pagerState.animateScrollToPage(1, animationSpec = BouncySpringSpec)
-        } else if (pagerState.settledPage == visibleTabsWithGhosts.lastIndex) {
-            pagerState.animateScrollToPage(visibleTabsWithGhosts.size - 2, animationSpec = BouncySpringSpec)
-        } else {
-            val targetTab = visibleTabsWithGhosts[pagerState.settledPage]
-            if (targetTab != null && targetTab != viewModel.selectedTab.value) {
-                onTabSelected(targetTab)
+    // ─── Haptics: Trigger exactly at 50% threshold ────────────────────────────
+    // snapshotFlow ignores the "settle" and fires as soon as the index integer flips
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.currentPage }.collect {
+            // Only vibrate if the user is actually swiping
+            if (pagerState.isScrollInProgress) {
+                haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
             }
         }
     }
 
-    // Sync ViewModel -> Pager
-    LaunchedEffect(tab) {
-        val targetPage = visibleTabsWithGhosts.indexOf(tab)
-        if (targetPage != -1 && targetPage != pagerState.currentPage) {
-            pagerState.animateScrollToPage(targetPage, animationSpec = BouncySpringSpec)
+    // ─── Sync Pager -> ViewModel ──────────────────────────────────────────────
+    LaunchedEffect(pagerState.settledPage) {
+        val targetTab = Tabs.getOrNull(pagerState.settledPage)
+        if (targetTab != null && targetTab != tab) {
+            onTabSelected(targetTab)
         }
     }
 
-    // Map current page back to a real Tab for the bottom bar highlight
-    val currentTabForHighlight = remember(pagerState.currentPage) {
-        visibleTabsWithGhosts.getOrNull(pagerState.currentPage) ?: tab
+    // ─── Sync ViewModel -> Pager ──────────────────────────────────────────────
+    LaunchedEffect(tab) {
+        val targetPage = Tabs.indexOf(tab)
+        if (targetPage != -1 && targetPage != pagerState.currentPage) {
+            pagerState.animateScrollToPage(targetPage, animationSpec = BouncySpringSpec)
+        }
     }
 
     Scaffold(
@@ -740,12 +716,13 @@ private fun BetterVizApp(
         },
         bottomBar = {
             NativeBottomBar(
-                selectedTab = currentTabForHighlight,
-                visibleTabs = rawVisibleTabs,
+                selectedTab = Tabs[pagerState.currentPage], // Snap highlight to current page
+                visibleTabs = Tabs,
                 onTabSelected = { targetTab ->
-                    val index = visibleTabsWithGhosts.indexOf(targetTab)
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    val index = Tabs.indexOf(targetTab)
                     if (index != -1 && index != pagerState.currentPage) {
+                        // Immediate haptic for the button click
+                        haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
                         scope.launch {
                             pagerState.animateScrollToPage(index, animationSpec = BouncySpringSpec)
                         }
@@ -754,7 +731,7 @@ private fun BetterVizApp(
             )
         },
     ) { innerPadding ->
-        Box(modifier = Modifier.fillMaxSize().padding(innerPadding).background(Color.Black)) {
+        Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
@@ -762,51 +739,42 @@ private fun BetterVizApp(
                 userScrollEnabled = true,
                 pageSpacing = 10.dp
             ) { pageIndex ->
-                val currentTab = visibleTabsWithGhosts[pageIndex]
+                val currentTab = Tabs[pageIndex]
+                val pageOffset = ((pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction).absoluteValue
 
-                if (currentTab == null) {
-                    // This is a ghost page - keep it empty
-                    BodyText("Huh\nwhat\nthe\nfuck\nare\nyou\ndoing\nhere\n?")
-                    Spacer(modifier = Modifier.fillMaxSize())
-                } else {
-                    val pageOffset = (
-                            (pagerState.currentPage - pageIndex) + pagerState.currentPageOffsetFraction
-                            ).absoluteValue
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .graphicsLayer {
-                                val fraction = 1f - pageOffset.coerceIn(0f, 1f)
-                                // Subtle scaling (0.95 to 1.0)
-                                val scale = 0.95f + (1f - 0.95f) * fraction
-                                scaleX = scale
-                                scaleY = scale
-                                alpha = 0.5f + (1f - 0.5f) * fraction
-                            }
-                    ) {
-                        when (currentTab) {
-                            Tab.Audio -> AudioScreen(
-                                isRunning = isRunning,
-                                latencyMs = latencyMs,
-                                onLatencyChanged = onLatencyChanged,
-                                latencyPresets = latencyPresets,
-                                onLatencyPresetsChanged = onLatencyPresetsChanged,
-                                autoDeviceEnabled = autoDeviceEnabled,
-                                onAutoDeviceToggle = onAutoDeviceToggle,
-                                connectedDeviceName = connectedDeviceName,
-                            )
-                            Tab.Glyphs -> GlyphsScreen(
-                                        gammaValue = gammaValue,
-                                        onGammaChanged = onGammaChanged,
-                                        presets = presets,
-                                        selectedPreset = selectedPreset,
-                                        onPresetSelected = onPresetSelected,
-                                    )
-                            Tab.Settings -> SettingsScreen()
-                            Tab.Haptics -> HapticsScreen()
-                            Tab.About -> AboutScreen()
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            val fraction = 1f - pageOffset.coerceIn(0f, 1f)
+                            // Your signature bouncy scaling
+                            val scale = 0.95f + (1f - 0.95f) * fraction
+                            scaleX = scale
+                            scaleY = scale
+                            alpha = 0.5f + (1f - 0.5f) * fraction
                         }
+                ) {
+                    when (currentTab) {
+                        Tab.Audio -> AudioScreen(
+                            isRunning = isRunning,
+                            latencyMs = latencyMs,
+                            onLatencyChanged = onLatencyChanged,
+                            latencyPresets = latencyPresets,
+                            onLatencyPresetsChanged = onLatencyPresetsChanged,
+                            autoDeviceEnabled = autoDeviceEnabled,
+                            onAutoDeviceToggle = onAutoDeviceToggle,
+                            connectedDeviceName = connectedDeviceName,
+                        )
+                        Tab.Glyphs -> GlyphsScreen(
+                            gammaValue = gammaValue,
+                            onGammaChanged = onGammaChanged,
+                            presets = presets,
+                            selectedPreset = selectedPreset,
+                            onPresetSelected = onPresetSelected,
+                        )
+                        Tab.Haptics -> HapticsScreen()
+                        Tab.Settings -> SettingsScreen()
+                        Tab.About -> AboutScreen()
                     }
                 }
             }
