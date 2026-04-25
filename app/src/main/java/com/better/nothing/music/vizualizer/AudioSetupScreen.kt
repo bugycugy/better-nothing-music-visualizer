@@ -2,7 +2,6 @@ package com.better.nothing.music.vizualizer
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -63,7 +62,6 @@ fun AudioScreen(
     // Logic to handle the toggle with permission check
     val handleAutoToggle: (Boolean) -> Unit = { setEnabled ->
         if (setEnabled) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val status = ContextCompat.checkSelfPermission(
                     context,
                     Manifest.permission.BLUETOOTH_CONNECT
@@ -76,9 +74,6 @@ fun AudioScreen(
             } else {
                 onAutoDeviceToggle(true)
             }
-        } else {
-            onAutoDeviceToggle(false)
-        }
     }
 
     Column(

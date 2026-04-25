@@ -64,13 +64,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.annotation.RequiresPermission
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
@@ -84,18 +79,14 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.fontscaling.MathUtils.lerp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
@@ -116,10 +107,6 @@ import kotlin.math.absoluteValue
 enum class Tab(val label: String) {
     Audio("Audio"), Glyphs("Glyphs"), Haptics("Haptics"), Settings("Settings"), About("About");
 
-    companion object {
-        // Allocated once at class-load time; never re-allocated during recomposition.
-        val all: List<Tab> = entries
-    }
 }
 
 private data class AudioRoute(
@@ -312,22 +299,6 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         return _connectedDeviceKey.value.takeIf { _autoDeviceEnabled.value }
     }
 
-    fun setGlyphTabEnabled(enabled: Boolean) {
-        _glyphTabEnabled.value = enabled
-        viewModelScope.launch(Dispatchers.IO) {
-            ctx.getSharedPreferences("viz_prefs", Context.MODE_PRIVATE)
-                .edit().putBoolean("glyph_tab_enabled", enabled).apply()
-        }
-    }
-
-    fun setHapticsTabEnabled(enabled: Boolean) {
-        _hapticsTabEnabled.value = enabled
-        viewModelScope.launch(Dispatchers.IO) {
-            ctx.getSharedPreferences("viz_prefs", Context.MODE_PRIVATE)
-                .edit().putBoolean("haptics_tab_enabled", enabled).apply()
-        }
-    }
-
     private fun commitPresetInfos(infos: List<AudioCaptureService.PresetInfo>) {
         _presetInfos.value = infos
         if (infos.none { it.key == _selectedPreset.value }) {
@@ -345,7 +316,7 @@ class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
 
     private val audioManager by lazy {
-        getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        getSystemService(AUDIO_SERVICE) as AudioManager
     }
 
     private val projectionManager by lazy {
@@ -460,8 +431,6 @@ class MainActivity : ComponentActivity() {
                     onAutoDeviceToggle = ::onAutoDeviceToggle,
                     glyphTabEnabled = glyphTabEnabled,
                     hapticsTabEnabled = hapticsTabEnabled,
-                    onGlyphTabToggle = ::onGlyphTabToggle,
-                    onHapticsTabToggle = ::onHapticsTabToggle,
                     viewModel = viewModel,
                 )
             }
@@ -507,20 +476,6 @@ class MainActivity : ComponentActivity() {
     private fun onAutoDeviceToggle(enabled: Boolean) {
         val latency = viewModel.setAutoDeviceEnabled(enabled)
         service?.setLatencyCompensationMs(latency)
-    }
-
-    private fun onGlyphTabToggle(enabled: Boolean) {
-        viewModel.setGlyphTabEnabled(enabled)
-        if (!enabled && viewModel.selectedTab.value == Tab.Glyphs) {
-            viewModel.selectTab(Tab.Audio)
-        }
-    }
-
-    private fun onHapticsTabToggle(enabled: Boolean) {
-        viewModel.setHapticsTabEnabled(enabled)
-        if (!enabled && viewModel.selectedTab.value == Tab.Haptics) {
-            viewModel.selectTab(Tab.Audio)
-        }
     }
 
     private fun onGammaChanged(value: Float) {
@@ -673,7 +628,7 @@ private fun AudioDeviceInfo.toAudioRoute(): AudioRoute {
         .trim('_')
         .ifBlank { "unknown_output" }
     val normalizedAddress = address
-        ?.lowercase()
+        .lowercase()
         ?.replace(Regex("[^a-z0-9._-]+"), "_")
         ?.trim('_')
         ?.takeIf { it.isNotBlank() }
@@ -728,8 +683,6 @@ private fun BetterVizApp(
     onAutoDeviceToggle: (Boolean) -> Unit,
     glyphTabEnabled: Boolean,
     hapticsTabEnabled: Boolean,
-    onGlyphTabToggle: (Boolean) -> Unit,
-    onHapticsTabToggle: (Boolean) -> Unit,
 ) {
     val autoDeviceEnabled by viewModel.autoDeviceEnabled.collectAsStateWithLifecycle()
     val connectedDeviceName by viewModel.connectedDeviceName.collectAsStateWithLifecycle()
@@ -742,7 +695,6 @@ private fun BetterVizApp(
 
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
-    var isAnimatingByClick by remember { mutableStateOf(false) }
 
     val pagerState = rememberPagerState(
         // Offset by 1 because of the ghost page at index 0
@@ -752,11 +704,7 @@ private fun BetterVizApp(
 
     // 1. Haptic feedback: Triggered when crossing the 50% threshold during manual swipe
     LaunchedEffect(pagerState.currentPage) {
-        // isScrollInProgress is true during manual swipes and programmatic animations.
-        // We check !isAnimatingByClick to ensure haptics only fire for manual user swipes.
-        if (pagerState.isScrollInProgress) {
             haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
-        }
     }
 
 // 2. Sync Pager -> ViewModel (Logic moved here, removed haptics from here)

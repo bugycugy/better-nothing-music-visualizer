@@ -22,14 +22,10 @@
 
     <!-- Settings Screen -->
     <string name="settings_title">Settings</string>
-    <string name="glyph_tab">Glyph Tab</string>
-    <string name="glyph_tab_description">Show or hide the glyph controls tab from the bottom navigation.</string>
-    <string name="haptics_tab">Haptics Tab</string>
-    <string name="haptics_tab_description">Show or hide the haptics tools tab from the bottom navigation.</string>
     <string name="app_theme">App Theme</string>
     <string name="theme_normal">Normal</string>
     <string name="theme_nothing_red">Nothing Red</string>
-    <string name="theme_help_text">Changes apply immediately and persist across app restarts.</string>
+    <string name="theme_help_text">Changes apply after app restart.</string>
     <string name="typography">Typography</string>
     <string name="font_ndot">NDot</string>
     <string name="font_ntype">NType</string>
@@ -38,7 +34,7 @@
 
     <!-- Haptics Screen -->
     <string name="haptics_title">Haptics</string>
-    <string name="haptics_description">Haptic tools are coming here next. This page is ready for vibration presets, pattern testing, and per-event feedback settings.</string>
+    <string name="haptics_description">Haptic visualisation is coming soon.</string>
 
     <!-- About Screen -->
     <string name="about_title">About</string>
