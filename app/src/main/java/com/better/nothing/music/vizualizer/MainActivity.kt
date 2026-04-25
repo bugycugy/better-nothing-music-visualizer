@@ -648,6 +648,11 @@ private val BouncySpringSpec = spring<Float>(
     stiffness = Spring.StiffnessLow
 )
 
+private val HeavyEasingSpec = tween<Float>(
+    durationMillis = 600,
+    easing = EaseOutQuart
+)
+
 @Composable
 private fun BetterVizApp(
     viewModel: MainViewModel,
@@ -701,7 +706,7 @@ private fun BetterVizApp(
     LaunchedEffect(tab) {
         val targetPage = Tabs.indexOf(tab)
         if (targetPage != -1 && targetPage != pagerState.currentPage) {
-            pagerState.animateScrollToPage(targetPage, animationSpec = BouncySpringSpec)
+            pagerState.animateScrollToPage(targetPage, animationSpec = HeavyEasingSpec)
         }
     }
 
@@ -722,7 +727,7 @@ private fun BetterVizApp(
                     val index = Tabs.indexOf(targetTab)
                     if (index != -1 && index != pagerState.currentPage) {
                         scope.launch {
-                            pagerState.animateScrollToPage(index, animationSpec = BouncySpringSpec)
+                            pagerState.animateScrollToPage(index, animationSpec = HeavyEasingSpec
                         }
                     }
                 }
