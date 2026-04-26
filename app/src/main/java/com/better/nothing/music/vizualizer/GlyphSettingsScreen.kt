@@ -138,7 +138,7 @@ internal fun GlyphsScreen(
                 animationSpec = spring(stiffness = Spring.StiffnessMedium)
             ) { description ->
                 Text(
-                    text = description ?: "No configuration loaded. Please check for updates in Settings to download the latest visualizer presets.",
+                    text = description ?: stringResource(R.string.glyph_no_config),
                     style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 22.sp),
                     color = Color(0xFFFFFFFF),
                     modifier = Modifier
@@ -177,19 +177,15 @@ private fun GlyphDebugWarningCard(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = "Nothing Phone (1) on Android 15",
+                text = stringResource(R.string.glyph_debug_title),
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onBackground,
             )
             BodyText(
-                text = if (developerModeEnabled) {
-                    "Glyph features need the Nothing glyph debug interface enabled through ADB on this device."
-                } else {
-                    "Glyph features need Developer options enabled first on Nothing Phone (1) running Android 15. After that, run this ADB command:"
-                }
+                text = stringResource(if (developerModeEnabled) R.string.glyph_debug_desc_adb_enabled else R.string.glyph_debug_desc_dev_options)
             )
             Text(
-                text = "adb shell settings put global nt_glyph_interface_debug_enable 1",
+                text = stringResource(R.string.glyph_debug_command),
                 color = MaterialTheme.colorScheme.primary,
                 style = MaterialTheme.typography.bodyLarge,
                 fontFamily = FontFamily.Monospace,
@@ -197,7 +193,7 @@ private fun GlyphDebugWarningCard(
             )
             if (developerModeEnabled) {
                 BodyText(
-                    text = "Run the command once from a computer with ADB, then reopen the app if the Glyphs still do not respond.",
+                    text = stringResource(R.string.glyph_debug_instruction),
                     size = 14.sp,
                     lineHeight = 20.sp,
                 )

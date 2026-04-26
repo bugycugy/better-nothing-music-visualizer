@@ -63,8 +63,8 @@ fun HapticsScreen(
         verticalArrangement = Arrangement.spacedBy(22.dp),
     ) {
         Spacer(modifier = Modifier.height(20.dp))
-        ScreenTitle(text = "Haptics")
-        BodyText(text = "Audio-reactive vibration settings.")
+        ScreenTitle(text = stringResource(R.string.haptics_header))
+        BodyText(text = stringResource(R.string.haptics_subtitle))
 
         // Haptic Motor Toggle
         Card(
@@ -80,7 +80,7 @@ fun HapticsScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Audio-Reactive Haptics",
+                    text = stringResource(R.string.haptics_motor_title),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -107,12 +107,12 @@ fun HapticsScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Impact Mode",
+                            text = stringResource(R.string.haptics_impact_mode_title),
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Sharp kicks on bass drops instead of constant vibration.",
+                            text = stringResource(R.string.haptics_impact_mode_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.Gray
                         )
@@ -135,7 +135,7 @@ fun HapticsScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        text = "Frequency: ${hapticFreqMin.toInt()} - ${hapticFreqMax.toInt()} Hz",
+                        text = stringResource(R.string.haptics_frequency_label, hapticFreqMin.toInt(), hapticFreqMax.toInt()),
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -157,7 +157,7 @@ fun HapticsScreen(
                     )
 
                     BodyText(
-                        text = "Vibrates based on audio amplitude in this range.",
+                        text = stringResource(R.string.haptics_frequency_desc),
                         size = 12.sp
                     )
                 }
@@ -174,7 +174,7 @@ fun HapticsScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        text = "Amplitude: ${"%.2f".format(hapticMultiplier)}x",
+                        text = stringResource(R.string.haptics_amplitude_label, hapticMultiplier),
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -198,7 +198,7 @@ fun HapticsScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
-                        text = "Gamma (Response): ${"%.2f".format(hapticGamma)}",
+                        text = stringResource(R.string.haptics_gamma_label, hapticGamma),
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface
                     )

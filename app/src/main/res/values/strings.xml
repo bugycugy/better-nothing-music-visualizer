@@ -37,6 +37,29 @@
     <!-- Haptics Screen -->
     <string name="haptics_title">Vibration</string>
     <string name="haptics_description">Haptic visualization is coming soon.</string>
+    <string name="haptics_header">Haptics</string>
+    <string name="haptics_subtitle">Audio-reactive vibration settings.</string>
+    <string name="haptics_motor_title">Audio-Reactive Haptics</string>
+    <string name="haptics_impact_mode_title">Impact Mode</string>
+    <string name="haptics_impact_mode_desc">Sharp kicks on bass drops instead of constant vibration.</string>
+    <string name="haptics_frequency_label">Frequency: %1$d - %2$d Hz</string>
+    <string name="haptics_frequency_desc">Vibrates based on audio amplitude in this range.</string>
+    <string name="haptics_amplitude_label">Amplitude: %.1fx</string>
+    <string name="haptics_gamma_label">Gamma (Response): %.1f</string>
+    <string name="experimental_features">Experimental Features</string>
+    <string name="idle_breathing_title">Idle Breathing</string>
+    <string name="idle_breathing_desc">Glyphs pulse subtly when the visualizer is active but no audio is playing.</string>
+    <string name="notification_flash_title">Notification Flash</string>
+    <string name="notification_flash_desc">Flashes all Glyphs briefly when a new notification arrives while the visualizer is running.</string>
+    <string name="settings_update_tip">Tip: You can shake your phone while on this screen to check for configuration updates!</string>
+    <string name="start_visualizer">Start visualizer</string>
+    <string name="stop_visualizer">Stop visualizer</string>
+    <string name="glyph_no_config">No configuration loaded. Please check for updates in Settings to download the latest visualizer presets.</string>
+    <string name="glyph_debug_title">Nothing Phone (1) on Android 15</string>
+    <string name="glyph_debug_desc_adb_enabled">Glyph features need the Nothing glyph debug interface enabled through ADB on this device.</string>
+    <string name="glyph_debug_desc_dev_options">Glyph features need Developer options enabled first on Nothing Phone (1) running Android 15. After that, run this ADB command:</string>
+    <string name="glyph_debug_command">adb shell settings put global nt_glyph_interface_debug_enable 1</string>
+    <string name="glyph_debug_instruction">Run the command once from a computer with ADB, then reopen the app if the Glyphs still do not respond.</string>
 
     <!-- About Screen -->
     <string name="about_title">About</string>

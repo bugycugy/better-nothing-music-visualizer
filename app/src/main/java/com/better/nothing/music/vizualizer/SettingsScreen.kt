@@ -121,7 +121,7 @@ internal fun SettingsScreen(
         // ── Visualizer Features ──────────────────────────────────────────────
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
-                text = "Experimental Features",
+                text = stringResource(R.string.experimental_features),
                 style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.padding(bottom = 4.dp),
             )
@@ -133,8 +133,8 @@ internal fun SettingsScreen(
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     FeatureToggle(
-                        title = "Idle Breathing",
-                        description = "Glyphs pulse subtly when the visualizer is active but no audio is playing.",
+                        title = stringResource(R.string.idle_breathing_title),
+                        description = stringResource(R.string.idle_breathing_desc),
                         checked = idleBreathingEnabled,
                         onCheckedChange = onIdleBreathingEnabledChanged
                     )
@@ -142,8 +142,8 @@ internal fun SettingsScreen(
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
 
                     FeatureToggle(
-                        title = "Notification Flash",
-                        description = "Flashes all Glyphs briefly when a new notification arrives while the visualizer is running.",
+                        title = stringResource(R.string.notification_flash_title),
+                        description = stringResource(R.string.notification_flash_desc),
                         checked = notificationFlashEnabled,
                         onCheckedChange = onNotificationFlashEnabledChanged
                     )
@@ -151,7 +151,7 @@ internal fun SettingsScreen(
             }
             
             Text(
-                text = "Tip: You can shake your phone while on this screen to check for configuration updates!",
+                text = stringResource(R.string.settings_update_tip),
                 style = MaterialTheme.typography.bodySmall,
                 color = Color.Gray,
                 modifier = Modifier.padding(horizontal = 8.dp)

@@ -206,7 +206,7 @@ fun StartStopButton(
                 )
             }
             Text(
-                text  = if (running) "Stop visualizer" else "Start visualizer",
+                text  = stringResource(if (running) R.string.stop_visualizer else R.string.start_visualizer),
                 style = MaterialTheme.typography.labelLarge.copy(
                     fontWeight    = FontWeight.Medium,
                     letterSpacing = 0.5.sp
