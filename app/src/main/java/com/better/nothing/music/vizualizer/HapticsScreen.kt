@@ -29,6 +29,21 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
+import kotlin.math.*
+
+// Linear position (0..1) to Logarithmic Frequency (20..2000)
+fun lerpLog(value: Float, min: Float, max: Float): Float {
+    val logMin = ln(min)
+    val logMax = ln(max)
+    return exp(logMin + (logMax - logMin) * value)
+}
+
+// Logarithmic Frequency (20..2000) back to Linear position (0..1)
+fun invLerpLog(freq: Float, min: Float, max: Float): Float {
+    val logMin = ln(min)
+    val logMax = ln(max)
+    return (ln(freq) - logMin) / (logMax - logMin)
+}
 
 @Composable
 fun HapticsScreen() {
@@ -100,53 +115,40 @@ fun HapticsScreen() {
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "Frequency Range (Hz)",
-                        style = MaterialTheme.typography.titleMedium,
+                        text = "Haptic Frequency: ${hapticFreqMin.toInt()} - ${hapticFreqMax.toInt()} Hz",
+                        style = MaterialTheme.typography.bodyMedium,
                         color = Color(0xFFE6E1E3)
                     )
 
-                    // Min Frequency
-                    Column {
-                        Text(
-                            text = "Min: ${hapticFreqMin.toInt()} Hz",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color(0xFFE6E1E3)
-                        )
-                        ExpressiveSlider(
-                            value = hapticFreqMin,
-                            onValueChange = { newVal ->
-                                hapticFreqMin = newVal.coerceAtMost(hapticFreqMax - 10f)
-                                prefs.edit().putInt("haptic_freq_min", hapticFreqMin.toInt()).apply()
-                            },
-                            valueRange = 20f..2000f,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
+                    // Convert our stored frequencies to a 0f..1f range for the slider
+                    val currentRange =
+                        invLerpLog(hapticFreqMin, 20f, 2000f)..invLerpLog(hapticFreqMax, 20f, 2000f)
 
-                    // Max Frequency
-                    Column {
-                        Text(
-                            text = "Max: ${hapticFreqMax.toInt()} Hz",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color(0xFFE6E1E3)
-                        )
-                        ExpressiveSlider(
-                            value = hapticFreqMax,
-                            onValueChange = { newVal ->
-                                hapticFreqMax = newVal.coerceAtLeast(hapticFreqMin + 10f)
-                                prefs.edit().putInt("haptic_freq_max", hapticFreqMax.toInt()).apply()
-                            },
-                            valueRange = 20f..2000f,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
+                    ExpressiveRangeSlider(
+                        value = currentRange,
+                        onValueChange = { newRange ->
+                            // Convert the 0..1 slider positions back to Hz
+                            val newMin = lerpLog(newRange.start, 20f, 2000f)
+                            val newMax = lerpLog(newRange.endInclusive, 20f, 2000f)
+
+                            // Enforce a minimum gap of 10Hz
+                            if (newMax - newMin >= 10f) {
+                                hapticFreqMin = newMin
+                                hapticFreqMax = newMax
+
+                                prefs.edit()
+                                    .putInt("haptic_freq_min", newMin.toInt())
+                                    .putInt("haptic_freq_max", newMax.toInt())
+                                    .apply()
+                            }
+                        },
+                        valueRange = 0f..1f, // The slider always operates on a 0..1 scale internally
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+
 
                     BodyText(
                         text = "Haptic motor will vibrate with the amplitude of audio frequencies in this range.",
