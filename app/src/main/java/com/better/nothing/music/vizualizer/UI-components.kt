@@ -2,8 +2,6 @@
 
 package com.better.nothing.music.vizualizer
 
-import android.app.Activity
-import android.content.Context
 import android.os.Build
 import android.view.MotionEvent
 import androidx.compose.animation.AnimatedContent
@@ -20,7 +18,6 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -385,7 +382,6 @@ fun ExpressiveRangeSlider(
     valueRange: ClosedFloatingPointRange<Float>,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
     val startInteractionSource = remember { MutableInteractionSource() }
     val endInteractionSource = remember { MutableInteractionSource() }
     val haptics = LocalHapticFeedback.current
@@ -562,7 +558,7 @@ fun BetterVizTheme(
         }
         "Liquorice Black" -> {
             androidx.compose.material3.darkColorScheme(
-                background = Color(0xFF0F0F0F), // Authentic Liquorice Black
+                background = Color(0xFF0F0F0F),
                 surface = Color(0xFF1A1A1A),
                 primary = Color(0xFFD8D3DA),
                 secondary = Color(0xFFA0FFA3),
@@ -670,7 +666,7 @@ fun BetterVizTheme(
         ),
     )
     CompositionLocalProvider(LocalAppSpacing provides AppSpacing()) {
-        androidx.compose.material3.MaterialTheme(
+        MaterialTheme(
             colorScheme = colorScheme,
             shapes = Shapes(
                 extraLarge = RoundedCornerShape(32.dp),
