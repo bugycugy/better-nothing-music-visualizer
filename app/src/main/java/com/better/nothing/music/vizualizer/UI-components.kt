@@ -498,46 +498,10 @@ fun BetterVizTheme(
 
     val targetColorScheme = when (themeName) {
         "Material You" -> {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                dynamicDarkColorScheme(context)
-            } else {
-                androidx.compose.material3.darkColorScheme(
-                    background = Color.Black,
-                    surface = Color(0xFF1A1A1A),
-                    primary = Color(0xFFD8D3DA),
-                    secondary = Color(0xFFA0FFA3),
-                    error = Color(0xFFC83B3B),
-                    onBackground = Color.White,
-                    onSurface = Color.White,
-                    onPrimary = Color(0xFF1C1A1D),
-                    onSecondary = Color(0xFF1C5A21),
-                    onError = Color.White,
-                    surfaceVariant = Color(0xFF242424),
-                    onSurfaceVariant = Color(0xFF676767),
-                    outline = Color(0xFF2C2C2C)
-                )
-            }
+            dynamicDarkColorScheme(context)
         }
         "Material You Light" -> {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                dynamicLightColorScheme(context)
-            } else {
-                androidx.compose.material3.lightColorScheme(
-                    background = Color.White,
-                    surface = Color(0xFFF5F5F5),
-                    primary = Color(0xFF000000),
-                    secondary = Color(0xFF626262),
-                    error = Color(0xFFEE0000),
-                    onBackground = Color.Black,
-                    onSurface = Color.Black,
-                    onPrimary = Color.White,
-                    onSecondary = Color.White,
-                    onError = Color.White,
-                    surfaceVariant = Color(0xFFE0E0E0),
-                    onSurfaceVariant = Color(0xFF757575),
-                    outline = Color(0xFFBDBDBD)
-                )
-            }
+            dynamicLightColorScheme(context)
         }
         "Nothing Red" -> {
             androidx.compose.material3.darkColorScheme(
