@@ -166,6 +166,18 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     val gammaValue = _gammaValue.asStateFlow()
     fun setGammaValue(value: Float) { _gammaValue.value = value }
 
+    // ── Sensitivity (Gain) ──────────────────────────────────────────────────
+    private val _gainValue = MutableStateFlow(1.0f)
+    val gainValue = _gainValue.asStateFlow()
+
+    fun setGainValue(value: Float) {
+        _gainValue.value = value
+        viewModelScope.launch(Dispatchers.IO) {
+            ctx.getSharedPreferences("viz_prefs", Context.MODE_PRIVATE)
+                .edit().putFloat("audio_gain", value).apply()
+        }
+    }
+
     // ── Running state ─────────────────────────────────────────────────────────
     private val _runningState = MutableStateFlow(false)
     val runningState = _runningState.asStateFlow()
@@ -195,6 +207,14 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     private val _hapticsTabEnabled = MutableStateFlow(true)
     val hapticsTabEnabled = _hapticsTabEnabled.asStateFlow()
 
+    // ── Visualizer State (Live Preview) ─────────────────────────────────────
+    private val _visualizerState = MutableStateFlow(floatArrayOf())
+    val visualizerState = _visualizerState.asStateFlow()
+
+    fun updateVisualizerState(state: FloatArray) {
+        _visualizerState.value = state
+    }
+
     // ── Haptic Settings ──────────────────────────────────────────────────────
     private val _hapticMotorEnabled = MutableStateFlow(false)
     val hapticMotorEnabled = _hapticMotorEnabled.asStateFlow()
@@ -211,11 +231,22 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     private val _hapticGamma = MutableStateFlow(2.0f)
     val hapticGamma = _hapticGamma.asStateFlow()
 
+    private val _hapticImpactEnabled = MutableStateFlow(false)
+    val hapticImpactEnabled = _hapticImpactEnabled.asStateFlow()
+
     fun setHapticMotorEnabled(enabled: Boolean) {
         _hapticMotorEnabled.value = enabled
         viewModelScope.launch(Dispatchers.IO) {
             ctx.getSharedPreferences("viz_prefs", Context.MODE_PRIVATE)
                 .edit().putBoolean("haptic_motor_enabled", enabled).apply()
+        }
+    }
+
+    fun setHapticImpactEnabled(enabled: Boolean) {
+        _hapticImpactEnabled.value = enabled
+        viewModelScope.launch(Dispatchers.IO) {
+            ctx.getSharedPreferences("viz_prefs", Context.MODE_PRIVATE)
+                .edit().putBoolean("haptic_impact_enabled", enabled).apply()
         }
     }
 
@@ -291,7 +322,10 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
                 _glyphTabEnabled.value = prefs.getBoolean("glyph_tab_enabled", true)
                 _hapticsTabEnabled.value = prefs.getBoolean("haptics_tab_enabled", true)
 
+                _gainValue.value = prefs.getFloat("audio_gain", 1.0f)
+
                 _hapticMotorEnabled.value = prefs.getBoolean("haptic_motor_enabled", false)
+                _hapticImpactEnabled.value = prefs.getBoolean("haptic_impact_enabled", false)
                 _hapticFreqMin.value = prefs.getInt("haptic_freq_min", 60).toFloat()
                 _hapticFreqMax.value = prefs.getInt("haptic_freq_max", 250).toFloat()
                 _hapticMultiplier.value = prefs.getFloat("haptic_multiplier", 1.0f)
@@ -390,6 +424,11 @@ class MainActivity : ComponentActivity() {
     private var pendingData: Intent? = null
     private var hasPendingToken = false
 
+    companion object {
+        var serviceStatic: AudioCaptureService? = null
+            private set
+    }
+
     private val mainHandler = Handler(Looper.getMainLooper())
     private val audioDeviceCallback = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
@@ -405,7 +444,9 @@ class MainActivity : ComponentActivity() {
         @RequiresPermission(Manifest.permission.RECORD_AUDIO)
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
             Log.d("BetterViz", "Service connected: $name")
-            service = (binder as AudioCaptureService.LocalBinder).service
+            val s = (binder as AudioCaptureService.LocalBinder).service
+            service = s
+            serviceStatic = s
             bound = true
             refreshConnectedAudioRoute()
             applyServiceSettings()
@@ -420,6 +461,7 @@ class MainActivity : ComponentActivity() {
 
         override fun onServiceDisconnected(name: ComponentName) {
             service = null
+            serviceStatic = null
             bound = false
             // Use the lightweight static check; the poller will also catch any change.
             viewModel.setRunning(AudioCaptureService.isRunning())
@@ -470,16 +512,21 @@ class MainActivity : ComponentActivity() {
                 val latencyMs      by viewModel.latencyMs.collectAsStateWithLifecycle()
                 val latencyPresets by viewModel.latencyPresets.collectAsStateWithLifecycle()
                 val gammaValue     by viewModel.gammaValue.collectAsStateWithLifecycle()
+                val gainValue      by viewModel.gainValue.collectAsStateWithLifecycle()
                 val presets        by viewModel.presetInfos.collectAsStateWithLifecycle()
                 val selectedPreset by viewModel.selectedPreset.collectAsStateWithLifecycle()
                 val glyphTabEnabled by viewModel.glyphTabEnabled.collectAsStateWithLifecycle()
                 val hapticsTabEnabled by viewModel.hapticsTabEnabled.collectAsStateWithLifecycle()
 
                 val hapticMotorEnabled by viewModel.hapticMotorEnabled.collectAsStateWithLifecycle()
+                val hapticImpactEnabled by viewModel.hapticImpactEnabled.collectAsStateWithLifecycle()
                 val hapticFreqMin by viewModel.hapticFreqMin.collectAsStateWithLifecycle()
                 val hapticFreqMax by viewModel.hapticFreqMax.collectAsStateWithLifecycle()
                 val hapticMultiplier by viewModel.hapticMultiplier.collectAsStateWithLifecycle()
                 val hapticGamma by viewModel.hapticGamma.collectAsStateWithLifecycle()
+
+                val vizState by viewModel.visualizerState.collectAsStateWithLifecycle()
+                val selectedDevice by viewModel.selectedDevice.collectAsStateWithLifecycle()
 
                 BetterVizApp(
                     tab = tab,
@@ -491,6 +538,8 @@ class MainActivity : ComponentActivity() {
                     onLatencyPresetsChanged = viewModel::updateLatencyPresets,
                     gammaValue = gammaValue,
                     onGammaChanged = ::onGammaChanged,
+                    gainValue = gainValue,
+                    onGainChanged = ::onGainChanged,
                     presets = presets,
                     selectedPreset = selectedPreset,
                     onPresetSelected = ::onPresetSelected,
@@ -499,6 +548,8 @@ class MainActivity : ComponentActivity() {
                     viewModel = viewModel,
                     hapticMotorEnabled = hapticMotorEnabled,
                     onHapticMotorEnabledChanged = ::onHapticMotorEnabledChanged,
+                    hapticImpactEnabled = hapticImpactEnabled,
+                    onHapticImpactEnabledChanged = ::onHapticImpactEnabledChanged,
                     hapticFreqMin = hapticFreqMin,
                     hapticFreqMax = hapticFreqMax,
                     onHapticFreqRangeChanged = ::onHapticFreqRangeChanged,
@@ -506,6 +557,8 @@ class MainActivity : ComponentActivity() {
                     onHapticMultiplierChanged = ::onHapticMultiplierChanged,
                     hapticGamma = hapticGamma,
                     onHapticGammaChanged = ::onHapticGammaChanged,
+                    vizState = vizState,
+                    selectedDevice = selectedDevice,
                 )
             }
         }
@@ -558,9 +611,19 @@ class MainActivity : ComponentActivity() {
         service?.setGamma(value)
     }
 
+    private fun onGainChanged(value: Float) {
+        viewModel.setGainValue(value)
+        service?.setGain(value)
+    }
+
     private fun onHapticMotorEnabledChanged(enabled: Boolean) {
         viewModel.setHapticMotorEnabled(enabled)
         service?.setHapticEnabled(enabled)
+    }
+
+    private fun onHapticImpactEnabledChanged(enabled: Boolean) {
+        viewModel.setHapticImpactEnabled(enabled)
+        service?.setHapticImpactEnabled(enabled)
     }
 
     private fun onHapticFreqRangeChanged(min: Float, max: Float) {
@@ -641,8 +704,10 @@ class MainActivity : ComponentActivity() {
         service?.setDevice(viewModel.selectedDevice.value)
         service?.setLatencyCompensationMs(viewModel.latencyMs.value)
         service?.setGamma(viewModel.gammaValue.value)
+        service?.setGain(viewModel.gainValue.value)
 
         service?.setHapticEnabled(viewModel.hapticMotorEnabled.value)
+        service?.setHapticImpactEnabled(viewModel.hapticImpactEnabled.value)
         service?.setHapticFreqRange(viewModel.hapticFreqMin.value, viewModel.hapticFreqMax.value)
         service?.setHapticMultiplier(viewModel.hapticMultiplier.value)
         service?.setHapticGamma(viewModel.hapticGamma.value)
@@ -766,8 +831,12 @@ private fun BetterVizApp(
     onPresetSelected: (String) -> Unit,
     onToggleVisualizer: () -> Unit,
     onAutoDeviceToggle: (Boolean) -> Unit,
+    gainValue: Float,
+    onGainChanged: (Float) -> Unit,
     hapticMotorEnabled: Boolean,
     onHapticMotorEnabledChanged: (Boolean) -> Unit,
+    hapticImpactEnabled: Boolean,
+    onHapticImpactEnabledChanged: (Boolean) -> Unit,
     hapticFreqMin: Float,
     hapticFreqMax: Float,
     onHapticFreqRangeChanged: (Float, Float) -> Unit,
@@ -775,12 +844,28 @@ private fun BetterVizApp(
     onHapticMultiplierChanged: (Float) -> Unit,
     hapticGamma: Float,
     onHapticGammaChanged: (Float) -> Unit,
+    vizState: FloatArray,
+    selectedDevice: Int,
 ) {
     val autoDeviceEnabled by viewModel.autoDeviceEnabled.collectAsStateWithLifecycle()
     val connectedDeviceName by viewModel.connectedDeviceName.collectAsStateWithLifecycle()
 
     val haptics = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
+
+    // ─── Polling: Update Live Preview ────────────────────────────────────────
+    LaunchedEffect(isRunning) {
+        if (isRunning) {
+            while (true) {
+                MainActivity.serviceStatic?.let { s ->
+                    viewModel.updateVisualizerState(s.getCurrentLightState())
+                }
+                delay(16)
+            }
+        } else {
+            viewModel.updateVisualizerState(floatArrayOf())
+        }
+    }
 
     val pagerState = rememberPagerState(
         initialPage = Tabs.indexOf(tab).coerceAtLeast(0),
@@ -871,6 +956,10 @@ private fun BetterVizApp(
                             autoDeviceEnabled = autoDeviceEnabled,
                             onAutoDeviceToggle = onAutoDeviceToggle,
                             connectedDeviceName = connectedDeviceName,
+                            gainValue = gainValue,
+                            onGainChanged = onGainChanged,
+                            vizState = vizState,
+                            selectedDevice = selectedDevice,
                         )
                         Tab.Glyphs -> GlyphsScreen(
                             gammaValue = gammaValue,
@@ -878,10 +967,15 @@ private fun BetterVizApp(
                             presets = presets,
                             selectedPreset = selectedPreset,
                             onPresetSelected = onPresetSelected,
+                            isRunning = isRunning,
+                            vizState = vizState,
+                            selectedDevice = selectedDevice,
                         )
                         Tab.Haptics -> HapticsScreen(
                             hapticMotorEnabled = hapticMotorEnabled,
                             onHapticMotorEnabledChanged = onHapticMotorEnabledChanged,
+                            hapticImpactEnabled = hapticImpactEnabled,
+                            onHapticImpactEnabledChanged = onHapticImpactEnabledChanged,
                             hapticFreqMin = hapticFreqMin,
                             hapticFreqMax = hapticFreqMax,
                             onHapticFreqRangeChanged = onHapticFreqRangeChanged,

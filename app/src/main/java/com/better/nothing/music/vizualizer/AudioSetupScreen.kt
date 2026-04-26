@@ -32,6 +32,12 @@ import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 
@@ -45,7 +51,11 @@ fun AudioScreen(
     onLatencyPresetsChanged: (List<Int>) -> Unit,
     autoDeviceEnabled: Boolean,
     onAutoDeviceToggle: (Boolean) -> Unit,
-    connectedDeviceName: String? = null
+    connectedDeviceName: String? = null,
+    gainValue: Float,
+    onGainChanged: (Float) -> Unit,
+    vizState: FloatArray,
+    selectedDevice: Int,
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
@@ -62,18 +72,18 @@ fun AudioScreen(
     // Logic to handle the toggle with permission check
     val handleAutoToggle: (Boolean) -> Unit = { setEnabled ->
         if (setEnabled) {
-                val status = ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.BLUETOOTH_CONNECT
-                )
-                if (status == PackageManager.PERMISSION_GRANTED) {
-                    onAutoDeviceToggle(true)
-                } else {
-                    permissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
-                }
-            } else {
+            val status = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.BLUETOOTH_CONNECT
+            )
+            if (status == PackageManager.PERMISSION_GRANTED) {
                 onAutoDeviceToggle(true)
+            } else {
+                permissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
             }
+        } else {
+            onAutoDeviceToggle(true)
+        }
     }
 
     Column(
@@ -84,6 +94,7 @@ fun AudioScreen(
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
         Spacer(modifier = Modifier.height(20.dp))
+
         ScreenTitle(text = stringResource(R.string.audio_screen_title))
 
         val descriptionText = if (isRunning) {
@@ -101,6 +112,34 @@ fun AudioScreen(
                     onToggle = handleAutoToggle,
                     deviceName = connectedDeviceName
                 )
+
+                // Sensitivity (Gain) Control
+                Card(
+                    shape = RoundedCornerShape(28.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "Audio Sensitivity: ${"%.1f".format(gainValue)}x",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Color(0xFFE6E1E3)
+                        )
+                        ExpressiveSlider(
+                            value = gainValue,
+                            onValueChange = onGainChanged,
+                            valueRange = 0.5f..5.0f,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        BodyText(
+                            text = "Adjust if the Glyphs are too dim or too bright.",
+                            size = 12.sp
+                        )
+                    }
+                }
 
                 BodyText(
                     text = stringResource(R.string.latency_compensation_description)

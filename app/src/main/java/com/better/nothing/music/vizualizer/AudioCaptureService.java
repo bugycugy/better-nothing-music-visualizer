@@ -172,8 +172,10 @@ public class AudioCaptureService extends Service {
     private volatile int mLatencySettingsVersion = 0;
     private volatile int mPresetConfigVersion = 0;
     private volatile float mGamma = DEFAULT_GAMMA;
+    private volatile float mGain = 1.0f;
 
     private volatile boolean mHapticEnabled = false;
+    private volatile boolean mHapticImpactEnabled = false;
     private volatile float mHapticMultiplier = 1.0f;
     private volatile float mHapticGamma = 2.0f;
     private volatile FrequencyRange mHapticRange = new FrequencyRange(60, 250);
@@ -465,8 +467,16 @@ public class AudioCaptureService extends Service {
         mGamma = gamma;
     }
 
+    public void setGain(float gain) {
+        mGain = gain;
+    }
+
     public void setHapticEnabled(boolean enabled) {
         mHapticEnabled = enabled;
+    }
+
+    public void setHapticImpactEnabled(boolean enabled) {
+        mHapticImpactEnabled = enabled;
     }
 
     public void setHapticFreqRange(float minHz, float maxHz) {
@@ -788,7 +798,22 @@ public class AudioCaptureService extends Service {
     private void performHapticFeedback(float rawPeak) {
         if (mVibrator == null || !mVibrator.hasVibrator()) return;
 
-        float current = rawPeak * SPECTRUM_GAIN * mHapticMultiplier;
+        float current = rawPeak * SPECTRUM_GAIN * mGain * mHapticMultiplier;
+
+        if (mHapticImpactEnabled) {
+            // Impact Mode: Sharp kicks on transients
+            // We use a very fast decay for the "rising" part and compare it to a slower tracker
+            float onsetThreshold = 1.5f;
+            if (current > mDecayedHapticState * onsetThreshold && current > (mHapticPeakTracker * 0.2f)) {
+                int kickAmplitude = Math.round(Math.min(1f, current / mHapticPeakTracker) * 255f);
+                kickAmplitude = Math.max(100, Math.min(255, kickAmplitude)); // Stronger kicks
+
+                mVibrator.vibrate(VibrationEffect.createOneShot(50, kickAmplitude));
+                mLastHapticUpdateMs = SystemClock.elapsedRealtime();
+                mDecayedHapticState = current; // Boost the state so we don't multi-trigger
+                return;
+            }
+        }
 
         // Smooth the input slightly to remove high-frequency noise/jitter
         mDecayedHapticState = (0.8f * mDecayedHapticState) + (0.2f * current);
@@ -831,6 +856,15 @@ public class AudioCaptureService extends Service {
         }
     }
 
+    public float[] getCurrentLightState() {
+        synchronized (mCaptureLock) {
+            if (mCurrentLightState == null || mCurrentLightState.length == 0) {
+                return new float[0];
+            }
+            return Arrays.copyOf(mCurrentLightState, mCurrentLightState.length);
+        }
+    }
+
     private float[] computeNextLightState(float[] uniquePeaks, VisualizerConfig config) {
         float[] decayedFrequencyState = computeDecayedFrequencyState(uniquePeaks, config);
         float[] nextState = new float[config.zones.length];
@@ -861,7 +895,7 @@ public class AudioCaptureService extends Service {
     private float[] computeDecayedFrequencyState(float[] uniquePeaks, VisualizerConfig config) {
         float[] next = new float[mDecayedFrequencyState.length];
         for (int i = 0; i < next.length; i++) {
-            float current = (i < uniquePeaks.length ? uniquePeaks[i] : 0f) * SPECTRUM_GAIN;
+            float current = (i < uniquePeaks.length ? uniquePeaks[i] : 0f) * SPECTRUM_GAIN * mGain;
             float risen = Math.max(mDecayedFrequencyState[i], current);
             float decayed = (config.decay * risen) + ((1f - config.decay) * current);
             next[i] = decayed < EPSILON ? 0f : decayed;

@@ -43,6 +43,8 @@ fun invLerpLog(freq: Float, min: Float, max: Float): Float {
 fun HapticsScreen(
     hapticMotorEnabled: Boolean,
     onHapticMotorEnabledChanged: (Boolean) -> Unit,
+    hapticImpactEnabled: Boolean,
+    onHapticImpactEnabledChanged: (Boolean) -> Unit,
     hapticFreqMin: Float,
     hapticFreqMax: Float,
     onHapticFreqRangeChanged: (Float, Float) -> Unit,
@@ -90,6 +92,38 @@ fun HapticsScreen(
         }
 
         if (hapticMotorEnabled) {
+            // Impact Mode Toggle
+            Card(
+                shape = RoundedCornerShape(28.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Impact Mode",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Color(0xFFE6E1E3)
+                        )
+                        Text(
+                            text = "Sharp kicks on bass drops instead of constant vibration.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
+                        )
+                    }
+                    Switch(
+                        checked = hapticImpactEnabled,
+                        onCheckedChange = onHapticImpactEnabledChanged
+                    )
+                }
+            }
+
             // Frequency Range Slider
             Card(
                 shape = RoundedCornerShape(28.dp),

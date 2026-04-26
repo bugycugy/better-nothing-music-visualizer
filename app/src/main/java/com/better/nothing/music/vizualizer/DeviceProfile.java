@@ -14,6 +14,7 @@ public final class DeviceProfile {
     public static final int DEVICE_NP2A = 3;
     public static final int DEVICE_NP3A = 4;
     public static final int DEVICE_NP4A = 5;
+    public static final int DEVICE_NP3 = 6;
 
     private DeviceProfile() {
     }
@@ -34,6 +35,7 @@ public final class DeviceProfile {
         if (Common.is25111()) {
             return DEVICE_NP4A;
         }
+        // Fallback for testing/debugging Phone 3 Matrix
         return DEVICE_UNKNOWN;
     }
 
@@ -44,6 +46,7 @@ public final class DeviceProfile {
             case DEVICE_NP2A -> "Phone (2a) / 2a+";
             case DEVICE_NP3A -> "Phone (3a) / 3a Pro";
             case DEVICE_NP4A -> "Phone (4a)";
+            case DEVICE_NP3 -> "Phone (3)";
             default -> "Unknown";
         };
     }
