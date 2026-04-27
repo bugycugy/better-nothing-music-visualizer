@@ -24,6 +24,8 @@
     <string name="settings_title">Settings</string>
     <string name="glyph_tab">Glyph Tab</string>
     <string name="glyph_tab_description">Show or hide glyph controls tab from bottom navigation bar.</string>
+    <string name="haptics_tab">Haptics Tab</string>
+    <string name="haptics_tab_description">Show or hide haptics tools tab from bottom navigation bar.</string>
     <string name="app_theme">App Theme</string>
     <string name="theme_normal">OLED Black</string>
     <string name="theme_liquorice">Liquorice Black</string>
