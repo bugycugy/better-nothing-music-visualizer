@@ -21,10 +21,8 @@ jobs:
       run: |
         if [ ! -f "gradlew" ]; then
           echo "Gradle wrapper missing, generating..."
-          # Download and unzip Gradle 9.4.1 manually to avoid installing old system versions
           wget https://services.gradle.org/distributions/gradle-9.4.1-bin.zip
           unzip -q gradle-9.4.1-bin.zip
-          # Use the downloaded gradle to generate the wrapper
           ./gradle-9.4.1/bin/gradle wrapper --gradle-version 9.4.1
         else
           echo "Gradle wrapper already exists"
@@ -47,8 +45,10 @@ jobs:
         rm -rf beta-builds
         mkdir -p beta-builds
 
-    - name: Copy APK
-      run: cp app/build/outputs/apk/release/app-release.apk beta-builds/app-release.apk
+    # UPDATED STEP: Uses find to locate the APK even if it's in a subdirectory
+    - name: Find and Copy APK
+      run: |
+        find app/build/outputs/apk/release -name "*.apk" -exec cp {} beta-builds/app-release.apk \;
 
     - name: Commit APK
       run: |
