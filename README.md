@@ -34,10 +34,8 @@ Currently these models are supported:
 - Nothing phone (3a)
 - Nothing phone (3a pro)
 - Nothing Phone (4a)
-
-Models not supported yet:
-- *Nothing Phone (4a pro)*
-- *Nothing phone (3)* **(beta, not good yet)**
+- Nothing Phone (4a pro)
+- Nothing phone (3) **(beta, not good yet)**
 
 
 ### <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/2699_fe0f/512.gif" alt="⚙" width="25" height="25"> How it works (technically)
