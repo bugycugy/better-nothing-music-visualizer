@@ -20,12 +20,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.LinearGradient
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.graphics.vector.toPath
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -336,51 +338,44 @@ fun GlyphPreview(
                             scale(1.03f, 1.03f, pivot = Offset.Zero)
                         }) {
                             paths["p3a_0-19"]?.let {
-                                drawPathRingSegmentsWithGradient(this, it, color, (0..19).toList(), smoothedState.value, baseOpacity,
+                                drawPathRingSegmentsWithGradient(this, it, (0..19).toList(), smoothedState.value, baseOpacity,
                                     Brush.linearGradient(
-                                        colors = listOf(
-                                            color.copy(alpha = 0f),
-                                            color.copy(alpha = 0.1f),
-                                            color.copy(alpha = 0.1f),
-                                            color.copy(alpha = 0.1f),
-                                            color.copy(alpha = 0f)
-                                        ),
-                                        stops = listOf(0.0f, 0.25f, 0.5f, 0.75f, 1.0f),
+                                        0.0f to color.copy(alpha = 0f),
+                                        0.25f to color.copy(alpha = 0.1f),
+                                        0.5f to color.copy(alpha = 0.1f),
+                                        0.75f to color.copy(alpha = 0.1f),
+                                        1.0f to color.copy(alpha = 0f),
                                         start = Offset(80f, 100f),
                                         end = Offset(15f, 0f)
                                     ))
                             }
                             paths["p3a_20-30"]?.let {
-                                drawPathRingSegmentsWithGradient(this, it, color, (20..30).toList(), smoothedState.value, baseOpacity,
+                                drawPathRingSegmentsWithGradient(this, it, (20..30).toList(), smoothedState.value, baseOpacity,
                                     Brush.linearGradient(
-                                        colors = listOf(
-                                            color.copy(alpha = 0f),
-                                            color.copy(alpha = 0.1f),
-                                            color.copy(alpha = 0.1f),
-                                            color.copy(alpha = 0.1f),
-                                            color.copy(alpha = 0.1f),
-                                            color.copy(alpha = 0.1f),
-                                            color.copy(alpha = 0.1f),
-                                            color.copy(alpha = 0.1f),
-                                            color.copy(alpha = 0.1f),
-                                            color.copy(alpha = 0.1f),
-                                            color.copy(alpha = 0f)
-                                        ),
-                                        stops = listOf(0.0f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1.0f),
+                                        0.0f to color.copy(alpha = 0f),
+                                        0.1f to color.copy(alpha = 0.1f),
+                                        0.2f to color.copy(alpha = 0.1f),
+                                        0.3f to color.copy(alpha = 0.1f),
+                                        0.4f to color.copy(alpha = 0.1f),
+                                        0.5f to color.copy(alpha = 0.1f),
+                                        0.6f to color.copy(alpha = 0.1f),
+                                        0.7f to color.copy(alpha = 0.1f),
+                                        0.8f to color.copy(alpha = 0.1f),
+                                        0.9f to color.copy(alpha = 0.1f),
+                                        1.0f to color.copy(alpha = 0f),
                                         start = Offset(55f, 0f),
                                         end = Offset(50f, 100f)
                                     ))
                             }
                             paths["p3a_31-35"]?.let {
-                                val gradientColors = (0..19).map { pos ->
+                                val colorStops = (0..19).map { pos ->
                                     val position = pos / 19f
-                                    color.copy(alpha = if (position < 0.1f || position > 0.9f) 0f else 0.1f)
+                                    val alpha = if (position !in 0.1f..0.9f) 0f else 0.1f
+                                    position to color.copy(alpha = alpha)
                                 }
-                                val gradientStops = (0..19).map { it / 19f }
-                                drawPathRingSegmentsWithGradient(this, it, color, (31..35).toList(), smoothedState.value, baseOpacity,
+                                drawPathRingSegmentsWithGradient(this, it, (31..35).toList(), smoothedState.value, baseOpacity,
                                     Brush.linearGradient(
-                                        colors = gradientColors,
-                                        stops = gradientStops,
+                                        *colorStops.toTypedArray(),
                                         start = Offset(15f, 100f),
                                         end = Offset(85f, 0f)
                                     ))
@@ -412,7 +407,7 @@ private fun drawPathRingSegments(scope: DrawScope, path: Path, color: Color, ind
         }
     }
 }
-private fun drawPathRingSegmentsWithGradient(scope: DrawScope, path: Path, color: Color, indices: List<Int>, state: FloatArray, baseOpacity: Float, baseGradient: Brush) {
+private fun drawPathRingSegmentsWithGradient(scope: DrawScope, path: Path, indices: List<Int>, state: FloatArray, baseOpacity: Float, baseGradient: Brush) {
     val b = path.getBounds()
     val count = indices.size
     val centerX = b.left + b.width/2
@@ -427,23 +422,7 @@ private fun drawPathRingSegmentsWithGradient(scope: DrawScope, path: Path, color
             right = if (isR) 182f else centerX,
             bottom = b.top + (row + 1) * sliceH
         ) {
-            // Create a modulated gradient by scaling all alphas
-            val modulatedGradient = when (baseGradient) {
-                is Brush.LinearGradient -> {
-                    val modulatedColors = baseGradient.colors.map { it.copy(alpha = it.alpha * alpha) }
-                    Brush.linearGradient(
-                        colors = modulatedColors,
-                        stops = baseGradient.stops,
-                        start = baseGradient.start,
-                        end = baseGradient.end,
-                        tileMode = baseGradient.tileMode
-                    )
-                }
-                else -> baseGradient
-            }
-                else -> baseGradient
-            }
-            scope.drawPath(path, modulatedGradient)
+            scope.drawPath(path, baseGradient, alpha = alpha)
         }
     }
 }
