@@ -2,6 +2,8 @@
 
 package com.better.nothing.music.vizualizer
 
+import com.better.nothing.music.vizualizer.R
+
 import android.view.MotionEvent
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
@@ -73,6 +75,7 @@ import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
@@ -253,16 +256,13 @@ fun NativeBottomBar(
                     )
                 },
                 icon = {
-                    Icon(
-                        imageVector = when (tab) {
-                            Tab.Audio -> Icons.AutoMirrored.Filled.VolumeUp
-                            Tab.Glyphs -> Icons.Filled.GraphicEq
-                            Tab.Haptics -> Icons.Filled.Vibration
-                            Tab.Settings -> Icons.Filled.Settings
-                            Tab.About -> Icons.Filled.Info
-                        },
-                        contentDescription = tab.label
-                    )
+                    when (tab) {
+                        Tab.Audio -> Icon(Icons.AutoMirrored.Filled.VolumeUp, tab.label)
+                        Tab.Glyphs -> Icon(painterResource(R.drawable.ic_nav_glyphs), tab.label)
+                        Tab.Haptics -> Icon(Icons.Filled.Vibration, tab.label)
+                        Tab.Settings -> Icon(Icons.Filled.Settings, tab.label)
+                        Tab.About -> Icon(Icons.Filled.Info, tab.label)
+                    }
                 },
                 colors = NavigationBarItemDefaults.colors(
                     indicatorColor = MaterialTheme.colorScheme.onSurfaceVariant,

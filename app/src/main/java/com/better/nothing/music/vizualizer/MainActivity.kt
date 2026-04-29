@@ -116,7 +116,7 @@ import kotlin.math.absoluteValue
 // Promoted to internal so MainViewModel can reference it without reflection.
 
 enum class Tab(val label: String) {
-    Audio("Audio"), Glyphs("Glyphs"), Haptics("Vibration"), Settings("Settings"), About("About");
+    Audio("Audio"), Glyphs("Glyphs"), Haptics("Haptics"), Settings("Settings"), About("About");
 
 }
 
