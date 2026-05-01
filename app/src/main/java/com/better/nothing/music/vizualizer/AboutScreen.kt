@@ -33,7 +33,7 @@ fun AboutScreen() {
     val credits = listOf(
         CreditEntry("Aleks-Levet", stringResource(R.string.credit_alekslevet_role), "Aleks-Levet"),
         CreditEntry("rKyzen (aka Shivank Dan)", stringResource(R.string.credit_rkyzen_role), "rKyzen"),
-        CreditEntry("Oliver Lebaigue", stringResource(R.string.credit_oliver_role), githubUsername = "oliver-leabigue-bright-bench"),
+        CreditEntry("Oliver Lebaigue", stringResource(R.string.credit_oliver_role), githubUsername = "oliver-lebaigue-bright-bench"),
         CreditEntry("Nicouschulas", stringResource(R.string.credit_nicouschulas_role), "Nicouschulas"),
         CreditEntry("SebiAi", stringResource(R.string.credit_sebiai_role), "SebiAi"),
         CreditEntry("Earnedel-lab", stringResource(R.string.credit_earnedel_role), "Earnedel-lab"),
