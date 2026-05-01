@@ -33,6 +33,7 @@ CHANGELOG HERE PLEASE: 2.7 TO 2.8:
 - Added NType font
 - More bouncy and snappy animations
 - Added more haptics at good places
+- Fixed "Check for Updates" crashing when updating zones.config (Thread handling fix).
 
 ///////////////////////////////////////////////////////////
 */
@@ -129,7 +130,7 @@ private data class AudioRoute(
 //
 // All mutable state lives here as MutableStateFlow so that:
 //   • State survives configuration changes — no full UI rebuild on rotation.
-//   • Collectors only recompose the subtree that reads a particular flow.
+//   • Collectors only recomposes the subtree that reads a particular flow.
 //   • All IO / CPU work is dispatched off the main thread.
 
 internal class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -175,7 +176,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     private fun updateSelectedDevice() {
         val actualDevice = DeviceProfile.detectDevice()
         val targetDevice = if (_developerModeEnabled.value) _spoofedDevice.value else actualDevice
-        
+
         if (selectedDevice.value != targetDevice) {
             selectedDevice.value = targetDevice
             refreshPresets()
@@ -271,14 +272,33 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         data class Error(val message: String) : ConfigUpdateStatus()
     }
 
+    // FIXED: Proper thread handling for network and UI updates
     fun updateZonesConfig() {
-        viewModelScope.launch(Dispatchers.IO) {
-            performUpdateAction()
+        // 1. Set loading state immediately on Main Thread
+        _configUpdateStatus.value = ConfigUpdateStatus.Updating
+
+        viewModelScope.launch {
+            try {
+                // 2. Perform network/download on IO Thread
+                val success = withContext(Dispatchers.IO) {
+                    performUpdateAction()
+                }
+
+                // 3. Back on Main Thread automatically after withContext
+                if (success) {
+                    _configUpdateStatus.value = ConfigUpdateStatus.Success("Successfully updated zones.config")
+                }
+                // Errors are handled inside performUpdateAction setting the status directly now,
+                // or we could return Result object. To keep it simple with existing code:
+            } catch (e: Exception) {
+                // Catch unexpected errors
+                _configUpdateStatus.value = ConfigUpdateStatus.Error("Error updating: ${e.message}")
+            }
         }
     }
 
     private suspend fun performUpdateAction(): Boolean {
-        _configUpdateStatus.value = ConfigUpdateStatus.Updating
+        // This runs on Dispatchers.IO (called from withContext(IO) above)
         return try {
             val url = URL("https://raw.githubusercontent.com/Aleks-Levet/better-nothing-music-visualizer/main/zones.config")
             val connection = url.openConnection() as HttpURLConnection
@@ -293,17 +313,22 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
                 val file = File(ctx.filesDir, "zones.config")
                 file.writeText(content)
 
-                _configUpdateStatus.value = ConfigUpdateStatus.Success("Successfully updated zones.config")
+                // Refresh presets (file IO)
                 refreshPresetsInternal()
+
                 // Force running service to reload its config from disk
                 MainActivity.serviceStatic?.reloadConfig()
                 true
             } else {
-                _configUpdateStatus.value = ConfigUpdateStatus.Error("Failed to download: ${connection.responseCode}")
+                withContext(Dispatchers.Main) {
+                    _configUpdateStatus.value = ConfigUpdateStatus.Error("Failed to download: ${connection.responseCode}")
+                }
                 false
             }
         } catch (e: Exception) {
-            _configUpdateStatus.value = ConfigUpdateStatus.Error("Error updating: ${e.message}")
+            withContext(Dispatchers.Main) {
+                _configUpdateStatus.value = ConfigUpdateStatus.Error("Error updating: ${e.message}")
+            }
             false
         }
     }
@@ -443,7 +468,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         // Run EVERYTHING heavy off-thread immediately
         viewModelScope.launch(Dispatchers.Default) {
             val prefs = ctx.getSharedPreferences("viz_prefs", Context.MODE_PRIVATE)
-            
+
             _developerModeEnabled.value = prefs.getBoolean("developer_mode_enabled", false)
             _spoofedDevice.value = prefs.getInt("spoofed_device", DeviceProfile.DEVICE_NP1)
 
@@ -531,11 +556,15 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
 
     private suspend fun refreshPresetsInternal() {
         // First clear to ensure UI refresh if somehow the data is merged
-        withContext(Dispatchers.Main.immediate) {
-            _presetInfos.value = emptyList()
-        }
         val infos = AudioCaptureService.loadPresetInfos(ctx, selectedDevice.value)
-        withContext(Dispatchers.Main.immediate) { commitPresetInfos(infos) }
+
+        // Switch to Main to update StateFlow safely
+        withContext(Dispatchers.Main) {
+            _presetInfos.value = infos
+            if (infos.none { it.key == _selectedPreset.value }) {
+                _selectedPreset.value = infos.firstOrNull()?.key.orEmpty()
+            }
+        }
     }
 
     /** Updates preset list in state and persists it; save is off main thread. */
