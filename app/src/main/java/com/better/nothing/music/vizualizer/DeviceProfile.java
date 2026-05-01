@@ -14,7 +14,8 @@ public final class DeviceProfile {
     public static final int DEVICE_NP2A = 3;
     public static final int DEVICE_NP3A = 4;
     public static final int DEVICE_NP4A = 5;
-    public static final int DEVICE_NP3 = 6;
+    public static final int DEVICE_NP4APRO = 6;
+    public static final int DEVICE_NP3 = 7;
 
     private DeviceProfile() {
     }
@@ -22,21 +23,21 @@ public final class DeviceProfile {
     public static int detectDevice() {
         if (Common.is20111()) {
             return DEVICE_NP1;
-        }
-        if (Common.is22111()) {
+        } else if (Common.is22111()) {
             return DEVICE_NP2;
-        }
-        if (Common.is23111() || Common.is23113()) {
+        } else if (Common.is23111() || Common.is23113()) {
             return DEVICE_NP2A;
-        }
-        if (Common.is24111()) {
+        } else if (Common.is24111()) {
             return DEVICE_NP3A;
-        }
-        if (Common.is25111()) {
+        } else if (Common.is25111()) {
             return DEVICE_NP4A;
+        } else if (Common.is25111p()){
+            return DEVICE_NP4APRO;
+        } else if (Common.is23112()) {
+            return DEVICE_NP3;
+        } else {
+            return DEVICE_UNKNOWN;
         }
-        // Fallback for testing/debugging Phone 3 Matrix
-        return DEVICE_UNKNOWN;
     }
 
     public static String deviceName(int device) {
@@ -46,6 +47,7 @@ public final class DeviceProfile {
             case DEVICE_NP2A -> "Phone (2a) / 2a+";
             case DEVICE_NP3A -> "Phone (3a) / 3a Pro";
             case DEVICE_NP4A -> "Phone (4a)";
+            case DEVICE_NP4APRO -> "phone (4a) pro";
             case DEVICE_NP3 -> "Phone (3)";
             default -> "Unknown";
         };

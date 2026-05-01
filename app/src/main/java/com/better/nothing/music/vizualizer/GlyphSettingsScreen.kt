@@ -376,8 +376,36 @@ fun GlyphPreview(
                             drawPath(it, Color.Red.copy(alpha = getA(6)))
                         }
                     }
+
+                    DeviceProfile.DEVICE_NP4APRO -> {
+                        withTransform({
+                            translate(-7f, -9f)
+                            scale(1.3f, 1.3f, pivot = Offset.Zero)
+                        }) {
+                            val pixelSize = 4.25f
+                            val pixelGap = 0.86f
+                            val gridSize = 13
+
+                            for (idx in smoothedState.value.indices) {
+                                if (idx >= gridSize * gridSize) break
+                                val a = getA(idx)
+                                val row = idx / gridSize
+                                val col = idx % gridSize
+                                drawRect(
+                                    color = color,
+                                    topLeft = Offset(
+                                        11.6f + col * (pixelSize + pixelGap),
+                                        11.6f + row * (pixelSize + pixelGap)
+                                    ),
+                                    size = androidx.compose.ui.geometry.Size(pixelSize, pixelSize),
+                                    alpha = a
+                                )
+                            }
+                        }
+                    }
+
+
                     DeviceProfile.DEVICE_NP3 -> {
-                        // Matrix view for Phone 3
                         withTransform({
                             translate(-7f, -9f)
                             scale(1.3f, 1.3f, pivot = Offset.Zero)
