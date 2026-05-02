@@ -25,7 +25,7 @@ Even if it technically isn’t, the visual response to music just isn’t very o
 ### See the difference in action! [**Click here to easily browse our video demos!**](https://github.com/Aleks-Levet/better-nothing-music-visualizer/blob/main/Demo-video-examples.md)
 
 ## 📲 Supported Nothing Phone Models
-Currently these models are supported:
+**Currently these models are supported:**
 - Nothing phone (1) 
   - Needs glyph debug mode **ON** for the app, set through an *ADB command*: `adb shell settings put global nt_glyph_interface_debug_enable 1`. This will be fixed once Nothing gives us their API key.
 - Nothing phone (2)
@@ -34,8 +34,10 @@ Currently these models are supported:
 - Nothing phone (3a)
 - Nothing phone (3a pro)
 - Nothing Phone (4a)
+
+**partial support:**
 - Nothing Phone (4a pro)
-- Nothing phone (3) **(beta, not good yet)**
+- Nothing phone (3) 
 
 
 ### <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/2699_fe0f/512.gif" alt="⚙" width="25" height="25"> How it works (technically)
