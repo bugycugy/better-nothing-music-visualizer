@@ -20,6 +20,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -149,18 +150,7 @@ fun GlyphPreviewContent(
             }
 
             fun drawGlyphPath(path: Path, alpha: Float) {
-                if (alpha > baseOpacity + 0.05f) {
-                    drawIntoCanvas { canvas ->
-                        val paint = Paint().asFrameworkPaint().apply {
-                            this.color = android.graphics.Color.WHITE
-                            setShadowLayer(15f * scale, 0f, 0f, android.graphics.Color.WHITE)
-                            this.alpha = (alpha * 255).toInt()
-                        }
-                        canvas.nativeCanvas.drawPath(path.asAndroidPath(), paint)
-                    }
-                } else {
-                    drawPath(path, color.copy(alpha = alpha))
-                }
+                drawPath(path, color.copy(alpha = alpha))
             }
 
             withTransform({
@@ -316,18 +306,7 @@ private fun drawPathAddressable(
             right = if (vertical) 1000f else b.left + (i + 1) * step,
             bottom = if (vertical) b.top + (i + 1) * step else 1000f
         ) {
-            if (alpha > baseOpacity + 0.05f) {
-                scope.drawIntoCanvas { canvas ->
-                    val paint = Paint().asFrameworkPaint().apply {
-                        this.color = android.graphics.Color.WHITE
-                        setShadowLayer(15f * scale, 0f, 0f, android.graphics.Color.WHITE)
-                        this.alpha = (alpha * 255).toInt()
-                    }
-                    canvas.nativeCanvas.drawPath(path.asAndroidPath(), paint)
-                }
-            } else {
-                scope.drawPath(path, color.copy(alpha = alpha))
-            }
+            scope.drawPath(path, color.copy(alpha = alpha))
         }
     }
 }
@@ -347,18 +326,7 @@ private fun drawPathRingSegments(scope: DrawScope, path: Path, color: Color, ind
             right = if (isR) 1000f else centerX,
             bottom = b.top + (row + 1) * sliceH
         ) {
-            if (alpha > baseOpacity + 0.05f) {
-                scope.drawIntoCanvas { canvas ->
-                    val paint = Paint().asFrameworkPaint().apply {
-                        this.color = android.graphics.Color.WHITE
-                        setShadowLayer(15f * scale, 0f, 0f, android.graphics.Color.WHITE)
-                        this.alpha = (alpha * 255).toInt()
-                    }
-                    canvas.nativeCanvas.drawPath(path.asAndroidPath(), paint)
-                }
-            } else {
-                scope.drawPath(path, color.copy(alpha = alpha))
-            }
+            scope.drawPath(path, color.copy(alpha = alpha))
         }
     }
 }
@@ -375,18 +343,7 @@ private fun drawPathVerticalSegments(scope: DrawScope, path: Path, color: Color,
             right = 1000f,
             bottom = b.bottom - i * sliceH
         ) {
-            if (alpha > baseOpacity + 0.05f) {
-                scope.drawIntoCanvas { canvas ->
-                    val paint = Paint().asFrameworkPaint().apply {
-                        this.color = android.graphics.Color.WHITE
-                        setShadowLayer(15f * scale, 0f, 0f, android.graphics.Color.WHITE)
-                        this.alpha = (alpha * 255).toInt()
-                    }
-                    canvas.nativeCanvas.drawPath(path.asAndroidPath(), paint)
-                }
-            } else {
-                scope.drawPath(path, color.copy(alpha = alpha))
-            }
+            scope.drawPath(path, color.copy(alpha = alpha))
         }
     }
 }
