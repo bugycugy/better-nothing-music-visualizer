@@ -166,6 +166,7 @@ public class AudioCaptureService extends Service {
     private volatile int mLatencyCompensationMs = 0;
     private volatile int mLatencySettingsVersion = 0;
     private volatile int mPresetConfigVersion = 0;
+    private volatile int mHapticSettingsVersion = 0;
     private volatile float mGamma = DEFAULT_GAMMA;
 
     private boolean mIdleBreathingEnabled = false;
@@ -502,6 +503,7 @@ public class AudioCaptureService extends Service {
     public void setHapticFreqRange(float minHz, float maxHz) {
         mHapticMinHz = minHz;
         mHapticMaxHz = maxHz;
+        mHapticSettingsVersion++;
     }
 
     public void setHapticMultiplier(float multiplier) {
@@ -662,20 +664,23 @@ public class AudioCaptureService extends Service {
 
         int appliedLatencyVersion = mLatencySettingsVersion;
         int appliedPresetVersion = mPresetConfigVersion;
+        int appliedHapticVersion = mHapticSettingsVersion;
 
         while (mCapturing && !Thread.currentThread().isInterrupted()) {
             AudioProcessor.VisualizerConfig config = mVisualizerConfig;
             int presetVersion = mPresetConfigVersion;
             int latencyVersion = mLatencySettingsVersion;
+            int hapticVersion = mHapticSettingsVersion;
 
             if (config == null) {
                 return;
             }
 
-            if (presetVersion != appliedPresetVersion || latencyVersion != appliedLatencyVersion) {
+            if (presetVersion != appliedPresetVersion || latencyVersion != appliedLatencyVersion || hapticVersion != appliedHapticVersion) {
                 pendingFrames.clear();
                 appliedPresetVersion = presetVersion;
                 appliedLatencyVersion = latencyVersion;
+                appliedHapticVersion = hapticVersion;
 
                 // Update FFT parameters
                 mAudioProcessor.updateFFTSize(mLatencyCompensationMs);
