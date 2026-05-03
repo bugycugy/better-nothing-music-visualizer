@@ -214,18 +214,6 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     val gammaValue = _gammaValue.asStateFlow()
     fun setGammaValue(value: Float) { _gammaValue.value = value }
 
-    // ── Sensitivity (Gain) ──────────────────────────────────────────────────
-    private val _gainValue = MutableStateFlow(1.0f)
-    val gainValue = _gainValue.asStateFlow()
-
-    fun setGainValue(value: Float) {
-        _gainValue.value = value
-        viewModelScope.launch(Dispatchers.IO) {
-            ctx.getSharedPreferences("viz_prefs", Context.MODE_PRIVATE)
-                .edit { putFloat("audio_gain", value) }
-        }
-    }
-
     // ── Running state ─────────────────────────────────────────────────────────
     private val _runningState = MutableStateFlow(false)
     val runningState = _runningState.asStateFlow()
@@ -384,22 +372,11 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     private val _hapticGamma = MutableStateFlow(2.0f)
     val hapticGamma = _hapticGamma.asStateFlow()
 
-    private val _hapticImpactEnabled = MutableStateFlow(false)
-    val hapticImpactEnabled = _hapticImpactEnabled.asStateFlow()
-
     fun setHapticMotorEnabled(enabled: Boolean) {
         _hapticMotorEnabled.value = enabled
         viewModelScope.launch(Dispatchers.IO) {
             ctx.getSharedPreferences("viz_prefs", Context.MODE_PRIVATE)
                 .edit { putBoolean("haptic_motor_enabled", enabled) }
-        }
-    }
-
-    fun setHapticImpactEnabled(enabled: Boolean) {
-        _hapticImpactEnabled.value = enabled
-        viewModelScope.launch(Dispatchers.IO) {
-            ctx.getSharedPreferences("viz_prefs", Context.MODE_PRIVATE)
-                .edit { putBoolean("haptic_impact_enabled", enabled) }
         }
     }
 
@@ -508,14 +485,11 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
                 _idleBreathingEnabled.value = prefs.getBoolean("idle_breathing_enabled", false)
                 _notificationFlashEnabled.value = prefs.getBoolean("notification_flash_enabled", false)
 
-                _gainValue.value = prefs.getFloat("audio_gain", 1.0f)
-
                 val theme = prefs.getString("selected_theme", "OLED Black") ?: "OLED Black"
                 _selectedTheme.value = if (theme == "Normal") "OLED Black" else theme
                 _selectedFont.value = prefs.getString("selected_font", "NDot") ?: "NDot"
 
                 _hapticMotorEnabled.value = prefs.getBoolean("haptic_motor_enabled", false)
-                _hapticImpactEnabled.value = prefs.getBoolean("haptic_impact_enabled", false)
                 _hapticFreqMin.value = prefs.getInt("haptic_freq_min", 60).toFloat()
                 _hapticFreqMax.value = prefs.getInt("haptic_freq_max", 250).toFloat()
                 _hapticMultiplier.value = prefs.getFloat("haptic_multiplier", 1.0f)
@@ -740,12 +714,10 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 val latencyMs      by viewModel.latencyMs.collectAsStateWithLifecycle()
                 val latencyPresets by viewModel.latencyPresets.collectAsStateWithLifecycle()
                 val gammaValue     by viewModel.gammaValue.collectAsStateWithLifecycle()
-                val gainValue      by viewModel.gainValue.collectAsStateWithLifecycle()
                 val presets        by viewModel.presetInfos.collectAsStateWithLifecycle()
                 val selectedPreset by viewModel.selectedPreset.collectAsStateWithLifecycle()
 
                 val hapticMotorEnabled by viewModel.hapticMotorEnabled.collectAsStateWithLifecycle()
-                val hapticImpactEnabled by viewModel.hapticImpactEnabled.collectAsStateWithLifecycle()
                 val hapticFreqMin by viewModel.hapticFreqMin.collectAsStateWithLifecycle()
                 val hapticFreqMax by viewModel.hapticFreqMax.collectAsStateWithLifecycle()
                 val hapticMultiplier by viewModel.hapticMultiplier.collectAsStateWithLifecycle()
@@ -780,8 +752,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                     onLatencyPresetsChanged = viewModel::updateLatencyPresets,
                     gammaValue = gammaValue,
                     onGammaChanged = ::onGammaChanged,
-                    gainValue = gainValue,
-                    onGainChanged = ::onGainChanged,
                     presets = presets,
                     selectedPreset = selectedPreset,
                     onPresetSelected = ::onPresetSelected,
@@ -790,8 +760,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                     viewModel = viewModel,
                     hapticMotorEnabled = hapticMotorEnabled,
                     onHapticMotorEnabledChanged = ::onHapticMotorEnabledChanged,
-                    hapticImpactEnabled = hapticImpactEnabled,
-                    onHapticImpactEnabledChanged = ::onHapticImpactEnabledChanged,
                     hapticFreqMin = hapticFreqMin,
                     hapticFreqMax = hapticFreqMax,
                     onHapticFreqRangeChanged = ::onHapticFreqRangeChanged,
@@ -871,19 +839,9 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         service?.setGamma(value)
     }
 
-    private fun onGainChanged(value: Float) {
-        viewModel.setGainValue(value)
-        service?.setGain(value)
-    }
-
     private fun onHapticMotorEnabledChanged(enabled: Boolean) {
         viewModel.setHapticMotorEnabled(enabled)
         service?.setHapticEnabled(enabled)
-    }
-
-    private fun onHapticImpactEnabledChanged(enabled: Boolean) {
-        viewModel.setHapticImpactEnabled(enabled)
-        service?.setHapticImpactEnabled(enabled)
     }
 
     private fun onHapticFreqRangeChanged(min: Float, max: Float) {
@@ -1061,10 +1019,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         service?.setDevice(viewModel.selectedDevice.value)
         service?.setLatencyCompensationMs(viewModel.latencyMs.value)
         service?.setGamma(viewModel.gammaValue.value)
-        service?.setGain(viewModel.gainValue.value)
 
         service?.setHapticEnabled(viewModel.hapticMotorEnabled.value)
-        service?.setHapticImpactEnabled(viewModel.hapticImpactEnabled.value)
         service?.setHapticFreqRange(viewModel.hapticFreqMin.value, viewModel.hapticFreqMax.value)
         service?.setHapticMultiplier(viewModel.hapticMultiplier.value)
         service?.setHapticGamma(viewModel.hapticGamma.value)
@@ -1239,12 +1195,8 @@ private fun BetterVizApp(
     onPresetSelected: (String) -> Unit,
     onToggleVisualizer: () -> Unit,
     onAutoDeviceToggle: (Boolean) -> Unit,
-    gainValue: Float,
-    onGainChanged: (Float) -> Unit,
     hapticMotorEnabled: Boolean,
     onHapticMotorEnabledChanged: (Boolean) -> Unit,
-    hapticImpactEnabled: Boolean,
-    onHapticImpactEnabledChanged: (Boolean) -> Unit,
     hapticFreqMin: Float,
     hapticFreqMax: Float,
     onHapticFreqRangeChanged: (Float, Float) -> Unit,
@@ -1366,9 +1318,6 @@ private fun BetterVizApp(
                             autoDeviceEnabled = autoDeviceEnabled,
                             onAutoDeviceToggle = onAutoDeviceToggle,
                             connectedDeviceName = connectedDeviceName,
-                            gainValue = gainValue,
-                            onGainChanged = onGainChanged,
-                            selectedDevice = selectedDevice,
                         )
                         Tab.Glyphs -> GlyphsScreen(
                             gammaValue = gammaValue,
@@ -1383,8 +1332,6 @@ private fun BetterVizApp(
                         Tab.Haptics -> HapticsScreen(
                             hapticMotorEnabled = hapticMotorEnabled,
                             onHapticMotorEnabledChanged = onHapticMotorEnabledChanged,
-                            hapticImpactEnabled = hapticImpactEnabled,
-                            onHapticImpactEnabledChanged = onHapticImpactEnabledChanged,
                             hapticFreqMin = hapticFreqMin,
                             hapticFreqMax = hapticFreqMax,
                             onHapticFreqRangeChanged = onHapticFreqRangeChanged,

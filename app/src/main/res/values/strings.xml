@@ -44,8 +44,6 @@
     <string name="haptics_header">Haptics</string>
     <string name="haptics_subtitle">Audio-reactive vibration settings.</string>
     <string name="haptics_motor_title">Audio-Reactive Haptics</string>
-    <string name="haptics_impact_mode_title">Impact Mode</string>
-    <string name="haptics_impact_mode_desc">Sharp kicks on bass drops instead of constant vibration.</string>
     <string name="haptics_frequency_label">Frequency: %1$d - %2$d Hz</string>
     <string name="haptics_frequency_desc">Vibrates based on audio amplitude in this range.</string>
     <string name="haptics_amplitude_label">Amplitude: %.1fx</string>

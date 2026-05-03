@@ -19,7 +19,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -43,8 +42,6 @@ fun invLerpLog(freq: Float, min: Float, max: Float): Float {
 fun HapticsScreen(
     hapticMotorEnabled: Boolean,
     onHapticMotorEnabledChanged: (Boolean) -> Unit,
-    hapticImpactEnabled: Boolean,
-    onHapticImpactEnabledChanged: (Boolean) -> Unit,
     hapticFreqMin: Float,
     hapticFreqMax: Float,
     onHapticFreqRangeChanged: (Float, Float) -> Unit,
@@ -92,38 +89,6 @@ fun HapticsScreen(
         }
 
         if (hapticMotorEnabled) {
-            // Impact Mode Toggle
-            Card(
-                shape = RoundedCornerShape(28.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = stringResource(R.string.haptics_impact_mode_title),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = stringResource(R.string.haptics_impact_mode_desc),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.Gray
-                        )
-                    }
-                    Switch(
-                        checked = hapticImpactEnabled,
-                        onCheckedChange = onHapticImpactEnabledChanged
-                    )
-                }
-            }
-
             // Frequency Range Slider
             Card(
                 shape = RoundedCornerShape(28.dp),
@@ -211,6 +176,6 @@ fun HapticsScreen(
                 }
             }
         }
-        Spacer(modifier = Modifier.height(28.dp))
+        Spacer(modifier = Modifier.height(50.dp))
     }
 }

@@ -301,7 +301,7 @@ internal fun SettingsScreen(
         }
 
         BodyText(text = stringResource(R.string.more_settings_coming))
-        Spacer(modifier = Modifier.height(28.dp))
+        Spacer(modifier = Modifier.height(50.dp))
     }
 }
 

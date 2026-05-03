@@ -21,14 +21,15 @@ import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Binder;
 import android.os.Build;
+import android.os.CombinedVibration;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Process;
 import android.os.SystemClock;
-import android.os.VibrationAttributes;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
+import android.os.VibratorManager;
 import android.service.quicksettings.TileService;
 import android.util.Log;
 
@@ -100,6 +101,15 @@ public class AudioCaptureService extends Service {
     private static final float EPSILON = 0.000001f;
     private static final long MIN_SEND_INTERVAL_MS = 16L;
     private static final long PROJECTION_SETTLE_DELAY_MS = 500L;
+    private static final int HAPTIC_STEP_MS = 5;
+    private static final int HAPTIC_INPUT_FRAME_MS = 16;
+    private static final int HAPTIC_BASE_WINDOW_MS = 80;
+    private static final int HAPTIC_MAX_WINDOW_MS = 200;
+    private static final int HAPTIC_LATENCY_PADDING_MS = 32;
+    private static final int HAPTIC_RESUBMIT_LEAD_MS = 24;
+    private static final long HAPTIC_DEBUG_LOG_INTERVAL_MS = 500L;
+    private static final float HAPTIC_DECAY_ALPHA = 0.82f;
+    private static final int HAPTIC_SILENCE_AMPLITUDE = 10;
 
     private static volatile boolean sIsRunning = false;
 
@@ -172,7 +182,6 @@ public class AudioCaptureService extends Service {
     private volatile int mLatencySettingsVersion = 0;
     private volatile int mPresetConfigVersion = 0;
     private volatile float mGamma = DEFAULT_GAMMA;
-    private volatile float mGain = 1.0f;
 
     private boolean mIdleBreathingEnabled = false;
     private long mSilenceStartTimeMs = 0;
@@ -185,14 +194,19 @@ public class AudioCaptureService extends Service {
     private static final long FLASH_DURATION_MS = 200L;
 
     private volatile boolean mHapticEnabled = false;
-    private volatile boolean mHapticImpactEnabled = false;
     private volatile float mHapticMultiplier = 1.0f;
     private volatile float mHapticGamma = 2.0f;
     private volatile FrequencyRange mHapticRange = new FrequencyRange(60, 250);
-    private float mHapticPeakTracker = EPSILON;
     private float mDecayedHapticState = 0f;
-    private int mLastHapticAmplitude = -1;
-    private long mLastHapticUpdateMs = 0;
+    private float mHapticPeakTracker = EPSILON;
+    private int mLastHapticSampleAmplitude = 0;
+    private int mHapticFrameRemainderMs = 0;
+    private boolean mHapticWaveformActive = false;
+    private long mLastHapticSubmitMs = 0L;
+    private long mLastHapticDebugLogMs = 0L;
+    private int[] mHapticAmplitudeBuffer = new int[0];
+    private long[] mHapticTimingBuffer = new long[0];
+    private VibratorManager mVibratorManager;
     private Vibrator mVibrator;
 
     private float[] mCurrentLightState = new float[0];
@@ -314,7 +328,13 @@ public class AudioCaptureService extends Service {
             mAudioManager.registerAudioDeviceCallback(mAudioDeviceCallback, mWorkerHandler);
         }
 
-        mVibrator = (Vibrator) getSystemService(VIBRATOR_SERVICE);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            mVibratorManager = getSystemService(VibratorManager.class);
+        }
+        mVibrator = mVibratorManager != null
+                ? mVibratorManager.getDefaultVibrator()
+                : (Vibrator) getSystemService(VIBRATOR_SERVICE);
+        ensureHapticBufferCapacity();
 
         mSelectedDevice = DeviceProfile.detectDevice();
         mLatencyCompensationMs = loadLatencyCompensationMs(this, mSelectedDevice);
@@ -547,10 +567,6 @@ public class AudioCaptureService extends Service {
         mGamma = gamma;
     }
 
-    public void setGain(float gain) {
-        mGain = gain;
-    }
-
     public void setIdleBreathingEnabled(boolean enabled) {
         mIdleBreathingEnabled = enabled;
         if (!enabled) mSilenceStartTimeMs = 0;
@@ -568,14 +584,10 @@ public class AudioCaptureService extends Service {
 
     public void setHapticEnabled(boolean enabled) {
         mHapticEnabled = enabled;
-        if (!enabled && mVibrator != null) {
-            mVibrator.cancel();
-            mLastHapticAmplitude = -1;
+        if (!enabled) {
+            stopHapticWaveform();
+            clearHapticWaveformState();
         }
-    }
-
-    public void setHapticImpactEnabled(boolean enabled) {
-        mHapticImpactEnabled = enabled;
     }
 
     public void setHapticFreqRange(float minHz, float maxHz) {
@@ -851,7 +863,7 @@ public class AudioCaptureService extends Service {
 
         // Apply haptics here so they follow the same latency queue as glyphs
         if (mHapticEnabled) {
-            performHapticFeedback(hapticPeak);
+            performHapticFeedback(hapticPeak, config);
         }
 
         if (!mSessionOpen || mGM == null) {
@@ -895,7 +907,7 @@ public class AudioCaptureService extends Service {
     private void applyIdleBreathing(float[] nextState, float[] uniquePeaks) {
         boolean isSilent = true;
         for (float peak : uniquePeaks) {
-            if (peak * SPECTRUM_GAIN * mGain > SILENCE_THRESHOLD) {
+            if (peak * SPECTRUM_GAIN > SILENCE_THRESHOLD) {
                 isSilent = false;
                 break;
             }
@@ -940,65 +952,54 @@ public class AudioCaptureService extends Service {
         return (float) Math.pow(normalizedValue, mGamma);
     }
 
-    private void performHapticFeedback(float rawPeak) {
-        if (mVibrator == null || !mVibrator.hasVibrator()) return;
-
-        float current = rawPeak * SPECTRUM_GAIN * mGain * mHapticMultiplier;
-
-        if (mHapticImpactEnabled) {
-            // Impact Mode: Sharp kicks on transients
-            // We use a very fast decay for the "rising" part and compare it to a slower tracker
-            float onsetThreshold = 1.5f;
-            if (current > mDecayedHapticState * onsetThreshold && current > (mHapticPeakTracker * 0.2f)) {
-                int kickAmplitude = Math.round(Math.min(1f, current / mHapticPeakTracker) * 255f);
-                kickAmplitude = Math.max(100, Math.min(255, kickAmplitude)); // Stronger kicks
-
-                mVibrator.vibrate(VibrationEffect.createOneShot(50, kickAmplitude));
-                mLastHapticUpdateMs = SystemClock.elapsedRealtime();
-                mDecayedHapticState = current; // Boost the state so we don't multi-trigger
-                return;
-            }
+    private void performHapticFeedback(float rawPeak, VisualizerConfig config) {
+        if (mVibrator == null || !mVibrator.hasVibrator()) {
+            return;
         }
 
-        // Smooth the input slightly to remove high-frequency noise/jitter
-        mDecayedHapticState = (0.8f * mDecayedHapticState) + (0.2f * current);
+        ensureHapticBufferCapacity();
+        if (mHapticAmplitudeBuffer.length == 0 || mHapticTimingBuffer.length != mHapticAmplitudeBuffer.length) {
+            return;
+        }
 
-        // Track peaks for auto-normalization
-        mHapticPeakTracker = Math.max(mDecayedHapticState, mHapticPeakTracker * 0.998f);
-        if (mHapticPeakTracker < EPSILON) return;
+        float current = rawPeak * SPECTRUM_GAIN * mHapticMultiplier;
+        float decay = config != null ? config.decay : HAPTIC_DECAY_ALPHA;
+        float risen = Math.max(mDecayedHapticState, current);
+        mDecayedHapticState = (decay * risen) + ((1f - decay) * current);
+        if (mDecayedHapticState < EPSILON) {
+            mDecayedHapticState = 0f;
+        }
 
-        float normalized = Math.min(1f, mDecayedHapticState / mHapticPeakTracker);
+        mHapticPeakTracker = Math.max(mDecayedHapticState, mHapticPeakTracker * PEAK_FALLOFF);
+        float normalized = mHapticPeakTracker > EPSILON
+                ? Math.min(1f, mDecayedHapticState / mHapticPeakTracker)
+                : 0f;
+
         float shaped = (float) Math.pow(normalized, mHapticGamma);
-
         int amplitude = Math.round(shaped * 255f);
         amplitude = Math.max(0, Math.min(255, amplitude));
-
-        // Deadzone to prevent the motor from "buzzing" at very low levels
-        if (amplitude < 15) amplitude = 0;
-
-        long now = SystemClock.elapsedRealtime();
-
-        // LOGIC: To prevent "tapping", we avoid restarting the motor unless necessary.
-        // We only call vibrate if:
-        // 1. The amplitude has changed significantly (avoiding micro-jitter restarts)
-        // 2. The previous vibration is about to expire (keep-alive)
-        // 3. We are transitioning from/to silence.
-
-        boolean significantChange = Math.abs(amplitude - mLastHapticAmplitude) > 35;
-        boolean transition = (amplitude == 0) != (mLastHapticAmplitude == 0);
-        boolean timeout = (now - mLastHapticUpdateMs) > 100;
-
-        if (significantChange || transition || (amplitude > 0 && timeout)) {
-            if (amplitude > 0) {
-                // Duration of 150ms is long enough to feel continuous if we update regularly.
-                // Modern Android restarts the effect on every call, which is why we limit calls.
-                mVibrator.vibrate(VibrationEffect.createOneShot(150, amplitude));
-                mLastHapticUpdateMs = now;
-            } else {
-                mVibrator.cancel();
-            }
-            mLastHapticAmplitude = amplitude;
+        if (amplitude < HAPTIC_SILENCE_AMPLITUDE) {
+            amplitude = 0;
         }
+        mLastHapticSampleAmplitude = amplitude;
+
+        int stepsToAppend = consumeHapticStepsForFrame();
+        boolean changed = appendHapticAmplitude(amplitude, stepsToAppend);
+        long now = SystemClock.elapsedRealtime();
+        if (isHapticBufferSilent()) {
+            if (mHapticWaveformActive) {
+                stopHapticWaveform();
+            }
+            logHapticDebug(now, rawPeak, current, normalized, amplitude, stepsToAppend, changed, true, false);
+            return;
+        }
+
+        boolean submitted = false;
+        if (!mHapticWaveformActive || changed || shouldRefreshHapticWaveform(now)) {
+            submitHapticWaveform();
+            submitted = true;
+        }
+        logHapticDebug(now, rawPeak, current, normalized, amplitude, stepsToAppend, changed, false, submitted);
     }
 
     public float[] getCurrentLightState() {
@@ -1040,7 +1041,7 @@ public class AudioCaptureService extends Service {
     private float[] computeDecayedFrequencyState(float[] uniquePeaks, VisualizerConfig config) {
         float[] next = new float[mDecayedFrequencyState.length];
         for (int i = 0; i < next.length; i++) {
-            float current = (i < uniquePeaks.length ? uniquePeaks[i] : 0f) * SPECTRUM_GAIN * mGain;
+            float current = (i < uniquePeaks.length ? uniquePeaks[i] : 0f) * SPECTRUM_GAIN;
             float risen = Math.max(mDecayedFrequencyState[i], current);
             float decayed = (config.decay * risen) + ((1f - config.decay) * current);
             next[i] = decayed < EPSILON ? 0f : decayed;
@@ -1064,8 +1065,8 @@ public class AudioCaptureService extends Service {
     }
 
     private void resetVisualizerState() {
-        mDecayedHapticState = 0f;
-        mLastHapticAmplitude = -1;
+        stopHapticWaveform();
+        clearHapticWaveformState();
         if (mVisualizerConfig == null) {
             mCurrentLightState = new float[0];
             mZonePeaks = new float[0];
@@ -1078,6 +1079,217 @@ public class AudioCaptureService extends Service {
         }
         mLastHash = Integer.MIN_VALUE;
         mLastSendMs = 0L;
+    }
+
+    private void ensureHapticBufferCapacity() {
+        int targetWindowMs = Math.max(
+                HAPTIC_BASE_WINDOW_MS,
+                Math.min(HAPTIC_MAX_WINDOW_MS, mLatencyCompensationMs + HAPTIC_LATENCY_PADDING_MS)
+        );
+        int targetStepCount = Math.max(1, (targetWindowMs + (HAPTIC_STEP_MS - 1)) / HAPTIC_STEP_MS);
+        if (mHapticAmplitudeBuffer.length == targetStepCount && mHapticTimingBuffer.length == targetStepCount) {
+            return;
+        }
+
+        int[] nextAmplitudes = new int[targetStepCount];
+        Arrays.fill(nextAmplitudes, mLastHapticSampleAmplitude);
+
+        long[] nextTimings = new long[targetStepCount];
+        Arrays.fill(nextTimings, HAPTIC_STEP_MS);
+
+        mHapticAmplitudeBuffer = nextAmplitudes;
+        mHapticTimingBuffer = nextTimings;
+    }
+
+    private void clearHapticWaveformState() {
+        mDecayedHapticState = 0f;
+        mHapticPeakTracker = EPSILON;
+        mLastHapticSampleAmplitude = 0;
+        mHapticFrameRemainderMs = 0;
+        mLastHapticSubmitMs = 0L;
+        if (mHapticAmplitudeBuffer.length > 0) {
+            Arrays.fill(mHapticAmplitudeBuffer, 0);
+        }
+        mHapticWaveformActive = false;
+    }
+
+    private int consumeHapticStepsForFrame() {
+        int totalMs = HAPTIC_INPUT_FRAME_MS + mHapticFrameRemainderMs;
+        int steps = Math.max(1, totalMs / HAPTIC_STEP_MS);
+        mHapticFrameRemainderMs = totalMs - (steps * HAPTIC_STEP_MS);
+        return Math.min(steps, mHapticAmplitudeBuffer.length);
+    }
+
+    private boolean appendHapticAmplitude(int amplitude, int stepsToAppend) {
+        if (stepsToAppend <= 0 || mHapticAmplitudeBuffer.length == 0) {
+            return false;
+        }
+
+        boolean changed = false;
+        int stepCount = mHapticAmplitudeBuffer.length;
+
+        if (stepsToAppend >= stepCount) {
+            for (int i = 0; i < stepCount; i++) {
+                if (mHapticAmplitudeBuffer[i] != amplitude) {
+                    changed = true;
+                    break;
+                }
+            }
+            if (changed) {
+                Arrays.fill(mHapticAmplitudeBuffer, amplitude);
+            }
+            return changed;
+        }
+
+        int retained = stepCount - stepsToAppend;
+        for (int i = 0; i < retained; i++) {
+            int next = mHapticAmplitudeBuffer[i + stepsToAppend];
+            if (mHapticAmplitudeBuffer[i] != next) {
+                changed = true;
+            }
+            mHapticAmplitudeBuffer[i] = next;
+        }
+        for (int i = retained; i < stepCount; i++) {
+            if (mHapticAmplitudeBuffer[i] != amplitude) {
+                changed = true;
+            }
+            mHapticAmplitudeBuffer[i] = amplitude;
+        }
+
+        return changed;
+    }
+
+    private boolean isHapticBufferSilent() {
+        for (int amplitude : mHapticAmplitudeBuffer) {
+            if (amplitude > 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean shouldRefreshHapticWaveform(long now) {
+        long durationMs = getHapticWaveformDurationMs();
+        if (durationMs <= 0L) {
+            return true;
+        }
+
+        long refreshAtMs = Math.max(HAPTIC_INPUT_FRAME_MS, durationMs - HAPTIC_RESUBMIT_LEAD_MS);
+        return (now - mLastHapticSubmitMs) >= refreshAtMs;
+    }
+
+    private long getHapticWaveformDurationMs() {
+        long durationMs = 0L;
+        for (long timing : mHapticTimingBuffer) {
+            durationMs += timing;
+        }
+        return durationMs;
+    }
+
+    private void submitHapticWaveform() {
+        if (mHapticTimingBuffer.length == 0 || mHapticTimingBuffer.length != mHapticAmplitudeBuffer.length) {
+            return;
+        }
+
+        try {
+            VibrationEffect effect = VibrationEffect.createWaveform(
+                    mHapticTimingBuffer,
+                    mHapticAmplitudeBuffer,
+                    -1
+            );
+            if (mVibratorManager != null) {
+                mVibratorManager.vibrate(CombinedVibration.createParallel(effect));
+            } else if (mVibrator != null) {
+                mVibrator.vibrate(effect);
+            }
+            mHapticWaveformActive = true;
+            mLastHapticSubmitMs = SystemClock.elapsedRealtime();
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to submit haptic waveform", e);
+        }
+    }
+
+    private void logHapticDebug(
+            long now,
+            float rawPeak,
+            float current,
+            float normalized,
+            int amplitude,
+            int stepsToAppend,
+            boolean changed,
+            boolean silent,
+            boolean submitted
+    ) {
+        if ((now - mLastHapticDebugLogMs) < HAPTIC_DEBUG_LOG_INTERVAL_MS) {
+            return;
+        }
+        mLastHapticDebugLogMs = now;
+
+        int min = Integer.MAX_VALUE;
+        int max = Integer.MIN_VALUE;
+        int nonZero = 0;
+        int first = mHapticAmplitudeBuffer.length > 0 ? mHapticAmplitudeBuffer[0] : -1;
+        int last = mHapticAmplitudeBuffer.length > 0 ? mHapticAmplitudeBuffer[mHapticAmplitudeBuffer.length - 1] : -1;
+
+        for (int value : mHapticAmplitudeBuffer) {
+            min = Math.min(min, value);
+            max = Math.max(max, value);
+            if (value > 0) {
+                nonZero++;
+            }
+        }
+
+        if (mHapticAmplitudeBuffer.length == 0) {
+            min = -1;
+            max = -1;
+        }
+
+        Log.d(
+                TAG,
+                "HAPTIC"
+                        + " raw=" + rawPeak
+                        + " current=" + current
+                        + " decayed=" + mDecayedHapticState
+                        + " peak=" + mHapticPeakTracker
+                        + " norm=" + normalized
+                        + " gamma=" + mHapticGamma
+                        + " mul=" + mHapticMultiplier
+                        + " amp=" + amplitude
+                        + " steps=" + stepsToAppend
+                        + " changed=" + changed
+                        + " silent=" + silent
+                        + " submitted=" + submitted
+                        + " active=" + mHapticWaveformActive
+                        + " bufLen=" + mHapticAmplitudeBuffer.length
+                        + " bufMin=" + min
+                        + " bufMax=" + max
+                        + " bufFirst=" + first
+                        + " bufLast=" + last
+                        + " nonZero=" + nonZero
+                        + " sinceSubmit=" + (now - mLastHapticSubmitMs)
+        );
+    }
+
+    private void stopHapticWaveform() {
+        if (!mHapticWaveformActive) {
+            return;
+        }
+
+        try {
+            if (mVibratorManager != null) {
+                mVibratorManager.cancel();
+            } else if (mVibrator != null) {
+                mVibrator.cancel();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to stop haptic waveform", e);
+        }
+        mHapticWaveformActive = false;
+        mLastHapticSubmitMs = 0L;
+    }
+
+    private static float clamp01(float value) {
+        return Math.max(0f, Math.min(1f, value));
     }
 
     private static float applyPercentSlice(float normalizedValue, ZoneSpec zone) {

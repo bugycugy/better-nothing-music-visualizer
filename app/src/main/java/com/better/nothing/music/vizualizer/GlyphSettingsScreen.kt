@@ -200,6 +200,7 @@ private fun GlyphDebugWarningCard(
                 )
             }
         }
+        Spacer(modifier = Modifier.height(50.dp))
     }
 }
 
@@ -219,23 +220,7 @@ fun GlyphPreview(
 ) {
     val color = MaterialTheme.colorScheme.primary
     val baseOpacity = 0.15f
-
-    // --- SMOOTHING ---
-    val smoothedState = remember { mutableStateOf(FloatArray(0)) }
-    LaunchedEffect(vizState) {
-        if (smoothedState.value.size != vizState.size) {
-            smoothedState.value = vizState.copyOf()
-        } else {
-            val next = FloatArray(vizState.size)
-            for (i in vizState.indices) {
-                val target = vizState[i]
-                val current = smoothedState.value[i]
-                val factor = if (target > current) 0.12f else 0.04f
-                next[i] = current + (target - current) * factor
-            }
-            smoothedState.value = next
-        }
-    }
+    val renderState = vizState
 
     val parser = remember { PathParser() }
     val paths = remember {
@@ -297,7 +282,7 @@ fun GlyphPreview(
 
             // LOCAL HELPER for Alpha
             fun getA(idx: Int): Float {
-                val value = smoothedState.value.getOrElse(idx) { 0f }
+                val value = renderState.getOrElse(idx) { 0f }
                 return baseOpacity + (value * (1f - baseOpacity))
             }
 
@@ -307,7 +292,7 @@ fun GlyphPreview(
             }) {
                 when (device) {
                     DeviceProfile.DEVICE_NP1 -> {
-                        if (smoothedState.value.size <= 5) {
+                        if (renderState.size <= 5) {
                             paths["p1_cam"]?.let { drawPath(it, color.copy(alpha = getA(0))) }
                             paths["p1_slash"]?.let { drawPath(it, color.copy(alpha = getA(1))) }
                             paths["p1s_ring"]?.let { drawPath(it, color.copy(alpha = getA(2))) }
@@ -322,7 +307,7 @@ fun GlyphPreview(
                             paths["p1_ring_tl"]?.let { drawPath(it, color.copy(alpha = getA(5))) }
                             paths["p1_dot"]?.let { drawPath(it, color.copy(alpha = getA(6))) }
                             paths["p1_battery"]?.let {
-                                drawPathVerticalSegments(this, it, color, 7..14, smoothedState.value, baseOpacity)
+                                drawPathVerticalSegments(this, it, color, 7..14, renderState, baseOpacity)
                             }
                         }
                     }
@@ -331,13 +316,13 @@ fun GlyphPreview(
                         paths["p2_1"]?.let { drawPath(it, color.copy(alpha = getA(1))) }
                         paths["p2_2"]?.let { drawPath(it, color.copy(alpha = getA(2))) }
                         paths["p2_ring"]?.let {
-                            drawPathRingSegments(this, it, color, (3..18).toList(), smoothedState.value, baseOpacity)
+                            drawPathRingSegments(this, it, color, (3..18).toList(), renderState, baseOpacity)
                         }
                         for (i in 19..24) {
                             paths["p2_$i"]?.let { drawPath(it, color.copy(alpha = getA(i))) }
                         }
                         paths["p2_battery"]?.let {
-                            drawPathVerticalSegments(this, it, color, 25..32, smoothedState.value, baseOpacity)
+                            drawPathVerticalSegments(this, it, color, 25..32, renderState, baseOpacity)
                         }
                     }
                     DeviceProfile.DEVICE_NP2A -> {
@@ -346,7 +331,7 @@ fun GlyphPreview(
                             scale(1.128745f, 1.128745f, pivot = Offset.Zero)
                         }) {
                             paths["p2a_large"]?.let {
-                                drawPathAddressable(this, it, color, (0..23).toList(), smoothedState.value, baseOpacity)
+                                drawPathAddressable(this, it, color, (0..23).toList(), renderState, baseOpacity)
                             }
                             paths["p2a_medium"]?.let { drawPath(it, color.copy(alpha = getA(24))) }
                             paths["p2a_small"]?.let { drawPath(it, color.copy(alpha = getA(25))) }
@@ -358,19 +343,19 @@ fun GlyphPreview(
                             scale(1.03f, 1.03f, pivot = Offset.Zero)
                         }) {
                             paths["p3a_large"]?.let {
-                                drawPathAddressable(this, it, color, (0..19).toList(), smoothedState.value, baseOpacity)
+                                drawPathAddressable(this, it, color, (0..19).toList(), renderState, baseOpacity)
                             }
                             paths["p3a_medium"]?.let {
-                                drawPathAddressable(this, it, color, (20..30).toList(), smoothedState.value, baseOpacity)
+                                drawPathAddressable(this, it, color, (20..30).toList(), renderState, baseOpacity)
                             }
                             paths["p3a_small"]?.let {
-                                drawPathAddressable(this, it, color, (31..35).toList(), smoothedState.value, baseOpacity, vertical = false)
+                                drawPathAddressable(this, it, color, (31..35).toList(), renderState, baseOpacity, vertical = false)
                             }
                         }
                     }
                     DeviceProfile.DEVICE_NP4A -> {
                         paths["p4a_bar"]?.let {
-                            drawPathAddressable(this, it, color, (0..5).toList(), smoothedState.value, baseOpacity, vertical = false)
+                            drawPathAddressable(this, it, color, (0..5).toList(), renderState, baseOpacity, vertical = false)
                         }
                         paths["p4a_dot"]?.let {
                             drawPath(it, Color.Red.copy(alpha = getA(6)))
@@ -386,7 +371,7 @@ fun GlyphPreview(
                             val pixelGap = 0.86f
                             val gridSize = 13
 
-                            for (idx in smoothedState.value.indices) {
+                            for (idx in renderState.indices) {
                                 if (idx >= gridSize * gridSize) break
                                 val a = getA(idx)
                                 val row = idx / gridSize
@@ -412,7 +397,7 @@ fun GlyphPreview(
                         }) {
                             val pixelSize = 4.25f
                             val pixelGap = 0.86f // inferred from SVG coords (e.g. 57.59 to 62.7 is 5.11)
-                            for (idx in smoothedState.value.indices) {
+                            for (idx in renderState.indices) {
                                 val a = getA(idx)
                                 // Simplified layout: 25x25 grid
                                 val row = idx / 25
