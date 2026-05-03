@@ -31,16 +31,21 @@ public final class ContinuousHapticEngine {
     private static final String TAG = "ContinuousHapticEngine";
 
     // Tune this to match your input cadence.
-    private static final int HAPTIC_STEP_MS = 16; // ~60 Hz
+    private static final int HAPTIC_STEP_MS = 100; 
 
     // Don't spam the vibrator service faster than this.
-    private static final long MIN_RESUBMIT_INTERVAL_MS = 12L;
+    private static final long MIN_RESUBMIT_INTERVAL_MS = 25L;
+
+    // Minimum change in amplitude to trigger a resubmit (0-255).
+    private static final int AMPLITUDE_THRESHOLD = 2;
 
     // Mapping / shaping
     private static final float DEFAULT_DECAY = 0.85f;
     private static final float DEFAULT_GAMMA = 2.0f;
     private static final float EPSILON = 0.0001f;
-    private static final float PEAK_FALLOFF = 0.9995f;
+    
+    // Faster falloff for haptics (approx. 1s to half-life) to keep it dynamic.
+    private static final float PEAK_FALLOFF = 0.99f; 
     private static final float SPECTRUM_GAIN = 4.0f;
 
     // Keep the motor from going completely dead for tiny non-zero values.
@@ -51,9 +56,9 @@ public final class ContinuousHapticEngine {
     @Nullable
     private final VibratorManager vibratorManager;
 
-    // Single repeating waveform: immediate start, then constant "on" segment.
-    private final long[] timings = new long[]{0L, HAPTIC_STEP_MS};
-    private final int[] amplitudes = new int[]{0, 0};
+    // Single repeating waveform: immediate start at requested amplitude.
+    private final long[] timings = new long[]{HAPTIC_STEP_MS};
+    private final int[] amplitudes = new int[]{0};
 
     private float hapticMultiplier = 1.0f;
     private float hapticGamma = DEFAULT_GAMMA;
@@ -95,12 +100,12 @@ public final class ContinuousHapticEngine {
             return;
         }
 
-        final float decay = (config != null) ? clamp01(config.decay) : DEFAULT_DECAY;
+        final float decay = (config != null) ? config.decay : DEFAULT_DECAY;
 
-        // Apply same base gain as LEDs
-        final float current = Math.max(0f, rawPeak) * SPECTRUM_GAIN;
+        // 1. Same base gain as LEDs
+        float current = Math.max(0f, rawPeak) * SPECTRUM_GAIN;
 
-        // Fast attack, soft release for smoothness
+        // 2. Instant-attack peak follower
         if (current > decayedState) {
             decayedState = current;
         } else {
@@ -113,40 +118,54 @@ public final class ContinuousHapticEngine {
             return;
         }
 
-        // Peak tracking for auto-normalization (Same as LEDs)
+        // 3. Peak tracking for auto-normalization
+        // Faster falloff for haptics ensures we don't get "stuck" with low vibration
+        // after a single loud sound.
         peakTracker = Math.max(decayedState, peakTracker * PEAK_FALLOFF);
         if (peakTracker < EPSILON) peakTracker = EPSILON;
 
-        // Normalize to recent peaks
+        // 4. Normalize to recent peak
         float normalized = decayedState / peakTracker;
 
-        // LED Logic: Quadratic shaping first
-        float ledShaped = normalized * normalized;
-
-        // Then apply User Gamma and Multiplier
-        float userShaped = (float) Math.pow(ledShaped, hapticGamma) * hapticMultiplier;
+        // 5. Apply User Gamma and Multiplier
+        // REMOVED the extra quadratic step (normalized * normalized) to prevent 
+        // crushing low-end detail. Now strictly follows the Gamma slider.
+        float shaped = (float) Math.pow(normalized, hapticGamma) * hapticMultiplier;
         
-        int finalAmplitude = Math.round(clamp01(userShaped) * MAX_AMPLITUDE);
+        int amplitude = Math.round(Math.min(1.0f, shaped) * MAX_AMPLITUDE);
 
-        if (finalAmplitude > 0) {
-            finalAmplitude = Math.max(MIN_ACTIVE_AMPLITUDE, finalAmplitude);
+        if (amplitude > 0) {
+            amplitude = Math.max(MIN_ACTIVE_AMPLITUDE, amplitude);
         }
-        finalAmplitude = clampInt(finalAmplitude, 0, MAX_AMPLITUDE);
+        amplitude = clampInt(amplitude, 0, MAX_AMPLITUDE);
 
-        if (finalAmplitude <= 0) {
+        if (amplitude <= 0) {
             stopHapticsInternal();
             return;
         }
 
         final long now = SystemClock.elapsedRealtime();
-        if (waveformActive && finalAmplitude == lastAmplitude) {
+        
+        // Skip if it's strictly the same to save overhead
+        if (waveformActive && amplitude == lastAmplitude) {
             return;
         }
-        if (waveformActive && (now - lastSubmitMs) < MIN_RESUBMIT_INTERVAL_MS) {
+        
+        // Only resubmit if change is significant OR enough time has passed
+        // This prevents the "jitter" of tiny updates while remaining responsive.
+        boolean significantChange = Math.abs(amplitude - lastAmplitude) >= AMPLITUDE_THRESHOLD;
+        boolean cooldownOver = (now - lastSubmitMs) >= MIN_RESUBMIT_INTERVAL_MS;
+
+        if (waveformActive && !significantChange && (now - lastSubmitMs) < 100) {
+            return;
+        }
+        
+        if (waveformActive && !cooldownOver) {
             return;
         }
 
-        submitContinuousWaveform(finalAmplitude);
+        Log.d(TAG, String.format(java.util.Locale.US, "Haptic Peak: %.4f | Amp: %d | Multi: %.1f", rawPeak, amplitude, hapticMultiplier));
+        submitContinuousWaveform(amplitude);
     }
 
     public synchronized void stopHaptics() {
@@ -160,11 +179,11 @@ public final class ContinuousHapticEngine {
             return;
         }
 
-        amplitudes[0] = 0;
-        amplitudes[1] = clampInt(amplitude, 0, MAX_AMPLITUDE);
+        amplitudes[0] = clampInt(amplitude, 0, MAX_AMPLITUDE);
 
         try {
-            VibrationEffect effect = VibrationEffect.createWaveform(timings, amplitudes, 1);
+            // Repeat from index 0 to keep it alive
+            VibrationEffect effect = VibrationEffect.createWaveform(timings, amplitudes, 0);
             vibrate(effect);
 
             waveformActive = true;
