@@ -188,13 +188,12 @@ public class AudioCaptureService extends Service {
     private volatile float mHapticGamma = 2.0f;
     private volatile float mHapticMinHz = 60;
     private volatile float mHapticMaxHz = 250;
-    private volatile FrequencyRange mHapticRange;
+    private volatile AudioProcessor.FrequencyRange mHapticRange;
     private ContinuousHapticEngine mHapticEngine;
 
-    private float[] mCurrentLightState = new float[0];
-    private float[] mZonePeaks = new float[0];
-    private float[] mDecayedFrequencyState = new float[0];
-    private int mLastHash = Integer.MIN_VALUE;
+    private AudioProcessor mAudioProcessor;
+    private GlyphRenderer mGlyphRenderer;
+    private AudioDeviceManager mAudioDeviceManager;
     private long mLastSendMs = 0L;
 
     private final AudioDeviceCallback mAudioDeviceCallback = new AudioDeviceCallback() {
@@ -307,10 +306,13 @@ public class AudioCaptureService extends Service {
         mWorkerHandler = Handler.createAsync(mWorkerThread.getLooper());
         mAudioManager = getSystemService(AudioManager.class);
         if (mAudioManager != null) {
-            mAudioManager.registerAudioDeviceCallback(mAudioDeviceCallback, mWorkerHandler);
+            mAudioManager.registerAudioDeviceCallback(mAudioDeviceManager, mWorkerHandler);
         }
 
         mHapticEngine = new ContinuousHapticEngine(this);
+        mAudioProcessor = new AudioProcessor();
+        mGlyphRenderer = new GlyphRenderer(mGamma, mIdleBreathingEnabled, mNotificationFlashEnabled);
+        mAudioDeviceManager = new AudioDeviceManager(this, this::refreshLatencyForCurrentAudioRoute);
 
         mSelectedDevice = DeviceProfile.detectDevice();
         mLatencyCompensationMs = loadLatencyCompensationMs(this, mSelectedDevice);
@@ -721,24 +723,18 @@ public class AudioCaptureService extends Service {
         }
 
         // Initial FFT setup based on current latency
+        mAudioProcessor.updateFFTSize(mLatencyCompensationMs);
+        float hzPerBin = mAudioProcessor.getHzPerBin();
         int fftSize = 4096;
         if (mLatencyCompensationMs >= 50) fftSize = 8192;
         if (mLatencyCompensationMs >= 100) fftSize = 16384;
-        int analysisWindow = fftSize / 2;
-        float hzPerBin = (float) SAMPLE_RATE / fftSize;
+        mHapticRange = new AudioProcessor.FrequencyRange(mHapticMinHz, mHapticMaxHz, hzPerBin, fftSize);
 
-        float[] hann = buildHannWindow(analysisWindow);
-        float[] ring = new float[analysisWindow];
         short[] hop = new short[HOP];
-        double[] fftData = new double[fftSize * 2]; // JTransforms needs double array, 2x size for complex
-        float[] magnitude = new float[fftSize / 2 + 1];
         ArrayDeque<PendingFrame> pendingFrames = new ArrayDeque<>();
-        DoubleFFT_1D fft = new DoubleFFT_1D(fftSize);
 
         int appliedLatencyVersion = mLatencySettingsVersion;
         int appliedPresetVersion = mPresetConfigVersion;
-        int ringPosition = 0;
-        int filled = 0;
 
         while (mCapturing && !Thread.currentThread().isInterrupted()) {
             VisualizerConfig config = mVisualizerConfig;
@@ -751,18 +747,13 @@ public class AudioCaptureService extends Service {
                 pendingFrames.clear();
                 appliedPresetVersion = presetVersion;
                 // Update FFT parameters based on new latency
-                fftSize = 4096;
+                mAudioProcessor.updateFFTSize(mLatencyCompensationMs);
+                float hzPerBin = mAudioProcessor.getHzPerBin();
+                int fftSize = 4096;
                 if (mLatencyCompensationMs >= 50) fftSize = 8192;
                 if (mLatencyCompensationMs >= 100) fftSize = 16384;
-                analysisWindow = fftSize / 2;
-                hzPerBin = (float) SAMPLE_RATE / fftSize;
-                hann = buildHannWindow(analysisWindow);
-                ring = new float[analysisWindow];
-                fftData = new double[fftSize * 2];
-                magnitude = new float[fftSize / 2 + 1];
-                fft = new DoubleFFT_1D(fftSize);
-                filled = 0;
-                ringPosition = 0;
+                mHapticRange = new AudioProcessor.FrequencyRange(mHapticMinHz, mHapticMaxHz, hzPerBin, fftSize);
+            }
             }
 
             int read = record.read(hop, 0, HOP, AudioRecord.READ_BLOCKING);
@@ -778,26 +769,9 @@ public class AudioCaptureService extends Service {
                 continue;
             }
 
-            for (int i = 0; i < read; i++) {
-                ring[ringPosition] = hop[i] / 32768f;
-                ringPosition = (ringPosition + 1) % analysisWindow;
-            }
-            filled = Math.min(filled + read, analysisWindow);
-            if (filled < analysisWindow) {
-                continue;
-            }
-
-            Arrays.fill(fftData, 0d);
-            for (int i = 0; i < analysisWindow; i++) {
-                fftData[2 * i] = ring[(ringPosition + i) % analysisWindow] * hann[i]; // real part
-                // imaginary part remains 0
-            }
-
-            fft.realForwardFull(fftData);
-            for (int i = 0; i <= fftSize / 2; i++) {
-                double re = fftData[2 * i];
-                double im = fftData[2 * i + 1];
-                magnitude[i] = (float) Math.hypot(re, im);
+            AudioProcessor.AudioFrameResult result = mAudioProcessor.processAudioFrame(hop, config, mHapticRange);
+            if (result == null) {
+                continue; // Not enough data for FFT
             }
 
             if (presetVersion != mPresetConfigVersion || config != mVisualizerConfig) {
@@ -812,16 +786,10 @@ public class AudioCaptureService extends Service {
                 appliedPresetVersion = presetVersion;
             }
 
-            float[] uniquePeaks = computeUniquePeaks(config, magnitude);
-
-            float hapticPeak = 0f;
-            FrequencyRange hRange = mHapticRange;
-            if (mHapticEnabled && hRange != null) {
-                hapticPeak = computeRangePeak(hRange, magnitude);
-            }
+            float hapticPeak = mHapticEnabled ? result.hapticPeak : 0f;
 
             pendingFrames.addLast(new PendingFrame(
-                    uniquePeaks,
+                    result.uniquePeaks,
                     hapticPeak,
                     config,
                     presetVersion,
@@ -831,41 +799,7 @@ public class AudioCaptureService extends Service {
         }
     }
 
-    private float[] computeUniquePeaks(VisualizerConfig config, float[] magnitude) {
-        float[] uniquePeaks = new float[config.uniqueRanges.length];
-        float dominantPeak = 0f;
-        for (int i = 0; i < config.uniqueRanges.length; i++) {
-            float peak = computeRangePeak(config.uniqueRanges[i], magnitude);
-            uniquePeaks[i] = peak;
-            if (peak > dominantPeak) {
-                dominantPeak = peak;
-            }
-        }
 
-        if (dominantPeak <= EPSILON) {
-            return uniquePeaks;
-        }
-
-        float leakageFloor = dominantPeak * SPECTRUM_LEAKAGE_FLOOR_RATIO;
-        for (int i = 0; i < uniquePeaks.length; i++) {
-            uniquePeaks[i] = Math.max(0f, uniquePeaks[i] - leakageFloor);
-        }
-        return uniquePeaks;
-    }
-
-    private float computeRangePeak(FrequencyRange range, float[] magnitude) {
-        if (range == null || magnitude == null || magnitude.length == 0) {
-            return 0f;
-        }
-
-        int start = Math.max(0, Math.min(range.binLo, magnitude.length - 1));
-        int end = Math.max(start, Math.min(range.binHi, magnitude.length - 1));
-        float peak = 0f;
-        for (int bin = start; bin <= end; bin++) {
-            peak = Math.max(peak, magnitude[bin]);
-        }
-        return peak;
-    }
 
     private void dispatchDueFrames(ArrayDeque<PendingFrame> pendingFrames) {
         long nowMs = SystemClock.elapsedRealtime();
@@ -898,355 +832,39 @@ public class AudioCaptureService extends Service {
             return;
         }
 
-        ensureStateArrays(config.zones.length, config.uniqueRanges.length);
-
-        float[] nextLightState = computeNextLightState(uniquePeaks, config);
-
-        long nowMs = SystemClock.elapsedRealtime();
-        if (nowMs - mLastNotificationFlashMs < FLASH_DURATION_MS) {
-            // Force 100% brightness for all zones during flash
-            Arrays.fill(nextLightState, 1.0f);
-        } else if (mIdleBreathingEnabled) {
-            applyIdleBreathing(nextLightState, uniquePeaks);
+        // Check for notification flash
+        if (now - mLastNotificationFlashMs < FLASH_DURATION_MS) {
+            mGlyphRenderer.triggerNotificationFlash(now);
         }
 
-        System.arraycopy(nextLightState, 0, mCurrentLightState, 0, nextLightState.length);
-
-        int[] frameColors = buildFrameColors(nextLightState, config.zones.length);
-        int frameHash = Arrays.hashCode(frameColors);
-        if (frameHash == mLastHash) {
-            return;
+        int[] frameColors = mGlyphRenderer.processFrame(uniquePeaks, config, now);
+        if (frameColors == null) {
+            return; // No change
         }
 
         try {
             mGM.setFrameColors(frameColors);
-            mLastHash = frameHash;
             mLastSendMs = now;
         } catch (Exception e) {
             Log.w(TAG, "Failed to push frame colors", e);
         }
     }
 
-    private void applyIdleBreathing(float[] nextState, float[] uniquePeaks) {
-        boolean isSilent = true;
-        for (float peak : uniquePeaks) {
-            if (peak * SPECTRUM_GAIN > SILENCE_THRESHOLD) {
-                isSilent = false;
-                break;
-            }
-        }
 
-        long now = SystemClock.elapsedRealtime();
-        if (isSilent) {
-            if (mSilenceStartTimeMs == 0) {
-                mSilenceStartTimeMs = now;
-            }
-
-            long silenceDuration = now - mSilenceStartTimeMs;
-            if (silenceDuration > BREATH_DELAY_MS) {
-                float progress = ((float)((silenceDuration - BREATH_DELAY_MS) % BREATH_PERIOD_MS)) / BREATH_PERIOD_MS;
-                // Sinusoidal breath: 0.0 to 1.0 to 0.0
-                float breathIntensity = (float) (0.5f * (1.0f + Math.sin(2.0 * Math.PI * progress - Math.PI / 2.0)));
-                // Scale it down so it's subtle (max 15% brightness)
-                float subtleBreath = breathIntensity * 0.15f;
-
-                for (int i = 0; i < nextState.length; i++) {
-                    nextState[i] = Math.max(nextState[i], subtleBreath);
-                }
-            }
-        } else {
-            mSilenceStartTimeMs = 0;
-        }
-    }
-
-    private int[] buildFrameColors(float[] normalizedLightState, int expectedLength) {
-        int[] frameColors = new int[expectedLength];
-        int count = Math.min(normalizedLightState.length, expectedLength);
-        for (int i = 0; i < count; i++) {
-            frameColors[i] = Math.round(applyGamma(normalizedLightState[i]) * 4095f);
-        }
-        return frameColors;
-    }
-
-    private float applyGamma(float normalizedValue) {
-        if (normalizedValue <= 0f) {
-            return 0f;
-        }
-        return (float) Math.pow(normalizedValue, mGamma);
-    }
-
-/**
- * Drop-in haptic controller for a visualizer-style amplitude stream.
- * <p>
- * Manifest:
- * <uses-permission android:name="android.permission.VIBRATE" />
- * <p>
- * Notes:
- * - minSdk 14 compatible.
- * - Uses VibratorManager on API 31+.
- * - Keeps a repeating waveform alive and only resubmits when the amplitude changes.
- * - Android 16 envelope APIs exist, but they do not give you a mutable "live motor";
- *   repeating waveform is the practical continuous solution across your API range.
- */
-public final class ContinuousHapticEngine {
-
-    private static final String TAG = "ContinuousHapticEngine";
-
-    // Tune this to match your input cadence.
-    private static final int HAPTIC_STEP_MS = 16; // ~60 Hz
-
-    // Don't spam the vibrator service faster than this.
-    private static final long MIN_RESUBMIT_INTERVAL_MS = 12L;
-
-    // Mapping / shaping
-    private static final float DEFAULT_DECAY = 0.85f;
-    private static final float DEFAULT_GAMMA = 1.0f;
-    private static final float EPSILON = 0.0001f;
-    private static final float DEFAULT_SPECTRUM_GAIN = 1.0f;
-
-    // Keep the motor from going completely dead for tiny non-zero values.
-    private static final int MIN_ACTIVE_AMPLITUDE = 1;
-    private static final int MAX_AMPLITUDE = 255;
-
-    private final Vibrator vibrator;
-    @Nullable
-    private final VibratorManager vibratorManager;
-
-    // Single repeating waveform: immediate start, then constant "on" segment.
-    private final long[] timings = new long[]{0L, HAPTIC_STEP_MS};
-    private final int[] amplitudes = new int[]{0, 0};
-
-    private float hapticMultiplier = 1.0f;
-    private float hapticGamma = DEFAULT_GAMMA;
-
-    private float decayedState = 0f;
-    private float peakTracker = EPSILON;
-
-    private int lastAmplitude = -1;
-    private long lastSubmitMs = 0L;
-    private boolean waveformActive = false;
-
-    public ContinuousHapticEngine(Context context) {
-        Context appContext = Objects.requireNonNull(context, "context").getApplicationContext();
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            VibratorManager vm = (VibratorManager) appContext.getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
-            this.vibratorManager = vm;
-            this.vibrator = (vm != null) ? vm.getDefaultVibrator() : nullSafeVibrator(appContext);
-        } else {
-            this.vibratorManager = null;
-            this.vibrator = nullSafeVibrator(appContext);
-        }
-    }
-
-    public synchronized void setHapticMultiplier(float multiplier) {
-        this.hapticMultiplier = Math.max(0f, multiplier);
-    }
-
-    public synchronized void setHapticGamma(float gamma) {
-        this.hapticGamma = Math.max(0.1f, gamma);
-    }
-
-    public synchronized boolean isRunning() {
-        return waveformActive;
-    }
-
-    public synchronized void performHapticFeedback(float rawPeak, @Nullable VisualizerConfig config) {
-        if (vibrator == null || !vibrator.hasVibrator()) {
-            return;
-        }
-
-        final float decay = (config != null) ? clamp01(config.decay) : DEFAULT_DECAY;
-
-        // Fast attack, soft release.
-        final float current = Math.max(0f, rawPeak) * DEFAULT_SPECTRUM_GAIN * hapticMultiplier;
-        if (current > decayedState) {
-            decayedState = current;
-        } else {
-            decayedState = (decay * decayedState) + ((1f - decay) * current);
-        }
-        if (decayedState < EPSILON) {
-            decayedState = 0f;
-        }
-
-        peakTracker = Math.max(decayedState, peakTracker * 0.995f);
-
-        final float normalized = (peakTracker > EPSILON)
-                ? Math.min(1f, decayedState / peakTracker)
-                : 0f;
-
-        final float shaped = (float) Math.pow(normalized, hapticGamma);
-        int amplitude = Math.round(shaped * MAX_AMPLITUDE);
-
-        if (amplitude > 0) {
-            amplitude = Math.max(MIN_ACTIVE_AMPLITUDE, amplitude);
-        }
-        amplitude = clampInt(amplitude, 0, MAX_AMPLITUDE);
-
-        if (amplitude <= 0) {
-            stopHapticsInternal();
-            return;
-        }
-
-        final long now = SystemClock.elapsedRealtime();
-        if (waveformActive && amplitude == lastAmplitude) {
-            return;
-        }
-        if (waveformActive && (now - lastSubmitMs) < MIN_RESUBMIT_INTERVAL_MS) {
-            return;
-        }
-
-        submitContinuousWaveform(amplitude);
-    }
-
-    public synchronized void stopHaptics() {
-        stopHapticsInternal();
-        decayedState = 0f;
-        peakTracker = EPSILON;
-    }
-
-    private void submitContinuousWaveform(int amplitude) {
-        if (vibrator == null || !vibrator.hasVibrator()) {
-            return;
-        }
-
-        amplitudes[0] = 0;
-        amplitudes[1] = clampInt(amplitude, 0, MAX_AMPLITUDE);
-
-        try {
-            VibrationEffect effect = VibrationEffect.createWaveform(timings, amplitudes, 1);
-            vibrate(effect);
-
-            waveformActive = true;
-            lastAmplitude = amplitude;
-            lastSubmitMs = SystemClock.elapsedRealtime();
-        } catch (RuntimeException e) {
-            Log.w(TAG, "Failed to submit haptic waveform", e);
-            stopHapticsInternal();
-        }
-    }
-
-    private void vibrate(VibrationEffect effect) {
-        if (vibratorManager != null) {
-            vibratorManager.vibrate(CombinedVibration.createParallel(effect));
-        } else {
-            vibrator.vibrate(effect);
-        }
-    }
-
-    private void stopHapticsInternal() {
-        if (!waveformActive) {
-            lastAmplitude = -1;
-            lastSubmitMs = 0L;
-            return;
-        }
-
-        try {
-            if (vibratorManager != null) {
-                vibratorManager.cancel();
-            } else if (vibrator != null) {
-                vibrator.cancel();
-            }
-        } catch (RuntimeException e) {
-            Log.w(TAG, "Failed to stop haptics", e);
-        }
-
-        waveformActive = false;
-        lastAmplitude = -1;
-        lastSubmitMs = 0L;
-    }
-
-    private static Vibrator nullSafeVibrator(Context context) {
-        VibratorManager vm = (VibratorManager) context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
-        return (vm != null) ? vm.getDefaultVibrator() : null;
-    }
-
-    private static float clamp01(float value) {
-        if (value < 0f) return 0f;
-        if (value > 1f) return 1f;
-        return value;
-    }
-
-    private static int clampInt(int value, int min, int max) {
-        return Math.max(min, Math.min(max, value));
-    }
-}
 
     public float[] getCurrentLightState() {
         synchronized (mCaptureLock) {
-            if (mCurrentLightState == null || mCurrentLightState.length == 0) {
-                return new float[0];
-            }
-            return Arrays.copyOf(mCurrentLightState, mCurrentLightState.length);
+            return mGlyphRenderer.getCurrentLightState();
         }
     }
 
-    private float[] computeNextLightState(float[] uniquePeaks, VisualizerConfig config) {
-        float[] decayedFrequencyState = computeDecayedFrequencyState(uniquePeaks, config);
-        float[] nextState = new float[config.zones.length];
 
-        for (int zoneIndex = 0; zoneIndex < config.zones.length; zoneIndex++) {
-            float rawZonePeak = 0f;
-            int[] overlappingRanges = config.zoneToRangeIndices[zoneIndex];
-            for (int rangeIndex : overlappingRanges) {
-                if (rangeIndex >= 0 && rangeIndex < decayedFrequencyState.length) {
-                    rawZonePeak = Math.max(rawZonePeak, decayedFrequencyState[rangeIndex]);
-                }
-            }
 
-            mZonePeaks[zoneIndex] = Math.max(rawZonePeak, mZonePeaks[zoneIndex] * PEAK_FALLOFF);
-            if (mZonePeaks[zoneIndex] < EPSILON) {
-                mZonePeaks[zoneIndex] = EPSILON;
-            }
 
-            float normalized = rawZonePeak / mZonePeaks[zoneIndex];
-            float shaped = normalized * normalized;
-            float mapped = applyPercentSlice(shaped, config.zones[zoneIndex]);
-            nextState[zoneIndex] = mapped < EPSILON ? 0f : mapped;
-        }
-
-        return nextState;
-    }
-
-    private float[] computeDecayedFrequencyState(float[] uniquePeaks, VisualizerConfig config) {
-        float[] next = new float[mDecayedFrequencyState.length];
-        for (int i = 0; i < next.length; i++) {
-            float current = (i < uniquePeaks.length ? uniquePeaks[i] : 0f) * SPECTRUM_GAIN;
-            float risen = Math.max(mDecayedFrequencyState[i], current);
-            float decayed = (config.decay * risen) + ((1f - config.decay) * current);
-            next[i] = decayed < EPSILON ? 0f : decayed;
-        }
-        System.arraycopy(next, 0, mDecayedFrequencyState, 0, next.length);
-        return next;
-    }
-
-    private void ensureStateArrays(int zoneCount, int uniqueRangeCount) {
-        if (mCurrentLightState.length == zoneCount
-                && mZonePeaks.length == zoneCount
-                && mDecayedFrequencyState.length == uniqueRangeCount) {
-            return;
-        }
-
-        mCurrentLightState = new float[zoneCount];
-        mZonePeaks = new float[zoneCount];
-        Arrays.fill(mZonePeaks, EPSILON);
-        mDecayedFrequencyState = new float[uniqueRangeCount];
-        mLastHash = Integer.MIN_VALUE;
-    }
 
     private void resetVisualizerState() {
         mHapticEngine.stopHaptics();
-        if (mVisualizerConfig == null) {
-            mCurrentLightState = new float[0];
-            mZonePeaks = new float[0];
-            mDecayedFrequencyState = new float[0];
-        } else {
-            mCurrentLightState = new float[mVisualizerConfig.zones.length];
-            mZonePeaks = new float[mVisualizerConfig.zones.length];
-            Arrays.fill(mZonePeaks, EPSILON);
-            mDecayedFrequencyState = new float[mVisualizerConfig.uniqueRanges.length];
-        }
-        mLastHash = Integer.MIN_VALUE;
+        mGlyphRenderer.resetState(mVisualizerConfig);
         mLastSendMs = 0L;
     }
 
@@ -1255,23 +873,7 @@ public final class ContinuousHapticEngine {
         return Math.max(0f, Math.min(1f, value));
     }
 
-    private static float applyPercentSlice(float normalizedValue, ZoneSpec zone) {
-        if (!zone.hasPercentSlice()) {
-            return normalizedValue;
-        }
 
-        float low = Math.min(zone.lowPercent, zone.highPercent);
-        float high = Math.max(zone.lowPercent, zone.highPercent);
-        float percent = normalizedValue * 100f;
-
-        if (percent <= low) {
-            return 0f;
-        }
-        if (percent >= high || high == low) {
-            return 1f;
-        }
-        return (percent - low) / (high - low);
-    }
 
     private void applyPresetSelection(String presetSelection) {
         try {
@@ -1840,15 +1442,7 @@ public final class ContinuousHapticEngine {
         }
     }
 
-    private static float[] buildHannWindow(int size) {
-        float[] hann = new float[size];
-        double denom = Math.max(1d, size - 1d);
-        for (int i = 0; i < size; i++) {
-            double phase = (2d * Math.PI * i) / denom;
-            hann[i] = (float) (0.5d * (1d - Math.cos(phase)));
-        }
-        return hann;
-    }
+
 
     private void refreshLatencyForCurrentAudioRoute() {
         SharedPreferences appPreferences = getSharedPreferences(APP_PREFS_NAME, Context.MODE_PRIVATE);
