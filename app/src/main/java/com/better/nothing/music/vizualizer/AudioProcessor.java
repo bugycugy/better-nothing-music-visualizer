@@ -30,8 +30,34 @@ public class AudioProcessor {
     private int ringPosition = 0;
     private int filled = 0;
 
+    private double[] fftData;
+    private float[] magnitude;
+    private float[] hann;
+    private DoubleFFT_1D fft;
+
     public AudioProcessor() {
         updateFFTSize(0); // Default
+    }
+
+    public void updateFFTSize(int latencyMs) {
+        int newFftSize = 4096; // Fixed size for temporal snappiness
+
+        if (this.fftSize == newFftSize && this.fft != null) {
+            return;
+        }
+
+        this.fftSize = newFftSize;
+        this.analysisWindow = fftSize;
+        this.hzPerBin = (float) SAMPLE_RATE / (float) fftSize;
+
+        this.fft = new DoubleFFT_1D(fftSize);
+        this.fftData = new double[fftSize * 2];
+        this.magnitude = new float[fftSize / 2 + 1];
+        this.hann = buildHannWindow(fftSize);
+
+        this.ring = new float[analysisWindow];
+        this.ringPosition = 0;
+        this.filled = 0;
     }
 
     public float getHzPerBin() {
@@ -51,16 +77,18 @@ public class AudioProcessor {
         }
 
         // Process FFT
-        Arrays.fill(fftData, 0d);
-        for (int i = 0; i < analysisWindow; i++) {
-            fftData[2 * i] = ring[(ringPosition + i) % analysisWindow] * hann[i];
+        // We use realForwardFull which expects real input in the first half of the array
+        // and produces complex output in the full array (interleaved).
+        for (int i = 0; i < fftSize; i++) {
+            fftData[i] = ring[(ringPosition + i) % analysisWindow] * hann[i];
         }
 
         fft.realForwardFull(fftData);
         for (int i = 0; i <= fftSize / 2; i++) {
             double re = fftData[2 * i];
             double im = fftData[2 * i + 1];
-            magnitude[i] = (float) Math.hypot(re, im);
+            // Normalize magnitude by fftSize to keep levels consistent across different window sizes
+            magnitude[i] = (float) (Math.hypot(re, im) / fftSize);
         }
 
         // Compute peaks
@@ -118,6 +146,31 @@ public class AudioProcessor {
     }
 
     // Inner classes for config
+    public static final class VisualizerConfig {
+        public final String presetKey;
+        public final String description;
+        public final float decay;
+        public final ZoneSpec[] zones;
+        public final FrequencyRange[] uniqueRanges;
+        public final int[][] zoneToRangeIndices;
+
+        public VisualizerConfig(
+                String presetKey,
+                String description,
+                float decay,
+                ZoneSpec[] zones,
+                FrequencyRange[] uniqueRanges,
+                int[][] zoneToRangeIndices
+        ) {
+            this.presetKey = presetKey;
+            this.description = description;
+            this.decay = decay;
+            this.zones = zones;
+            this.uniqueRanges = uniqueRanges;
+            this.zoneToRangeIndices = zoneToRangeIndices;
+        }
+    }
+
     public static final class ZoneSpec {
         final float lowHz;
         final float highHz;
@@ -159,3 +212,4 @@ public class AudioProcessor {
             this.hapticPeak = hapticPeak;
         }
     }
+}

@@ -40,7 +40,8 @@ public final class ContinuousHapticEngine {
     private static final float DEFAULT_DECAY = 0.85f;
     private static final float DEFAULT_GAMMA = 1.0f;
     private static final float EPSILON = 0.0001f;
-    private static final float DEFAULT_SPECTRUM_GAIN = 1.0f;
+    private static final float PEAK_FALLOFF = 0.9995f;
+    private static final float SPECTRUM_GAIN = 4.0f;
 
     // Keep the motor from going completely dead for tiny non-zero values.
     private static final int MIN_ACTIVE_AMPLITUDE = 1;
@@ -89,32 +90,40 @@ public final class ContinuousHapticEngine {
         return waveformActive;
     }
 
-    public synchronized void performHapticFeedback(float rawPeak, @Nullable VisualizerConfig config) {
+    public synchronized void performHapticFeedback(float rawPeak, @Nullable AudioProcessor.VisualizerConfig config) {
         if (vibrator == null || !vibrator.hasVibrator()) {
             return;
         }
 
         final float decay = (config != null) ? clamp01(config.decay) : DEFAULT_DECAY;
 
-        // Fast attack, soft release.
-        final float current = Math.max(0f, rawPeak) * DEFAULT_SPECTRUM_GAIN * hapticMultiplier;
+        // Apply same base gain as LEDs
+        final float current = Math.max(0f, rawPeak) * SPECTRUM_GAIN;
+
+        // Fast attack, soft release for smoothness
         if (current > decayedState) {
             decayedState = current;
         } else {
             decayedState = (decay * decayedState) + ((1f - decay) * current);
         }
+
         if (decayedState < EPSILON) {
             decayedState = 0f;
+            stopHapticsInternal();
+            return;
         }
 
-        peakTracker = Math.max(decayedState, peakTracker * 0.995f);
+        // Peak tracking for auto-normalization (Same as LEDs)
+        peakTracker = Math.max(decayedState, peakTracker * PEAK_FALLOFF);
+        if (peakTracker < EPSILON) peakTracker = EPSILON;
 
-        final float normalized = (peakTracker > EPSILON)
-                ? Math.min(1f, decayedState / peakTracker)
-                : 0f;
+        // Normalize to recent peaks
+        float normalized = decayedState / peakTracker;
 
-        final float shaped = (float) Math.pow(normalized, hapticGamma);
-        int amplitude = Math.round(shaped * MAX_AMPLITUDE);
+        // Apply User Gamma and Multiplier
+        float shaped = (float) Math.pow(normalized, hapticGamma) * hapticMultiplier;
+        
+        int amplitude = Math.round(clamp01(shaped) * MAX_AMPLITUDE);
 
         if (amplitude > 0) {
             amplitude = Math.max(MIN_ACTIVE_AMPLITUDE, amplitude);

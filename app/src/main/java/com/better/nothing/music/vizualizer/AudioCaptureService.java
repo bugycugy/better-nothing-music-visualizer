@@ -20,7 +20,6 @@ import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Binder;
 import android.os.Build;
-import android.os.CombinedVibration;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
@@ -94,10 +93,6 @@ public class AudioCaptureService extends Service {
     private static final int FPS = 60;
     private static final int HOP = Math.round(SAMPLE_RATE / (float) FPS);
 
-    private static final float PEAK_FALLOFF = 0.9995f;
-    private static final float SPECTRUM_GAIN = 4f;
-    private static final float SPECTRUM_LEAKAGE_FLOOR_RATIO = 0.12f;
-    private static final float EPSILON = 0.000001f;
     private static final long MIN_SEND_INTERVAL_MS = 16L;
     private static final long PROJECTION_SETTLE_DELAY_MS = 500L;
 
@@ -163,7 +158,7 @@ public class AudioCaptureService extends Service {
     private ExecutorService mCaptureExecutor;
     private volatile boolean mCapturing = false;
 
-    private volatile VisualizerConfig mVisualizerConfig;
+    private volatile AudioProcessor.VisualizerConfig mVisualizerConfig;
     private String mPresetKey = DEFAULT_PRESET_KEY;
     private String mDetectedPhoneModel = PHONE_MODEL_UNKNOWN;
     private List<String> mAvailablePresetKeys = Collections.emptyList();
@@ -174,18 +169,11 @@ public class AudioCaptureService extends Service {
     private volatile float mGamma = DEFAULT_GAMMA;
 
     private boolean mIdleBreathingEnabled = false;
-    private long mSilenceStartTimeMs = 0;
-    private static final float SILENCE_THRESHOLD = 0.005f;
-    private static final long BREATH_DELAY_MS = 3000L;
-    private static final long BREATH_PERIOD_MS = 5000L;
-
     private boolean mNotificationFlashEnabled = false;
     private long mLastNotificationFlashMs = 0;
     private static final long FLASH_DURATION_MS = 200L;
 
     private volatile boolean mHapticEnabled = false;
-    private volatile float mHapticMultiplier = 1.0f;
-    private volatile float mHapticGamma = 2.0f;
     private volatile float mHapticMinHz = 60;
     private volatile float mHapticMaxHz = 250;
     private volatile AudioProcessor.FrequencyRange mHapticRange;
@@ -208,71 +196,14 @@ public class AudioCaptureService extends Service {
         }
     };
 
-    private static final class ZoneSpec {
-        final float lowHz;
-        final float highHz;
-        final float lowPercent;
-        final float highPercent;
-
-        ZoneSpec(float lowHz, float highHz, float lowPercent, float highPercent) {
-            this.lowHz = lowHz;
-            this.highHz = highHz;
-            this.lowPercent = lowPercent;
-            this.highPercent = highPercent;
-        }
-
-        boolean hasPercentSlice() {
-            return !Float.isNaN(lowPercent) && !Float.isNaN(highPercent);
-        }
-    }
-
-    private static final class FrequencyRange {
-        final float lowHz;
-        final float highHz;
-        final int binLo;
-        final int binHi;
-
-        FrequencyRange(float lowHz, float highHz, float hzPerBin, int fftSize) {
-            this.lowHz = lowHz;
-            this.highHz = highHz;
-            this.binLo = Math.max(0, (int) Math.ceil(lowHz / hzPerBin));
-            this.binHi = Math.max(binLo, Math.min(fftSize / 2, (int) Math.floor(highHz / hzPerBin)));
-        }
-    }
-
-    private static final class VisualizerConfig {
-        final String presetKey;
-        final String description;
-        final float decay;
-        final ZoneSpec[] zones;
-        final FrequencyRange[] uniqueRanges;
-        final int[][] zoneToRangeIndices;
-
-        VisualizerConfig(
-                String presetKey,
-                String description,
-                float decay,
-                ZoneSpec[] zones,
-                FrequencyRange[] uniqueRanges,
-                int[][] zoneToRangeIndices
-        ) {
-            this.presetKey = presetKey;
-            this.description = description;
-            this.decay = decay;
-            this.zones = zones;
-            this.uniqueRanges = uniqueRanges;
-            this.zoneToRangeIndices = zoneToRangeIndices;
-        }
-    }
-
     private static final class PendingFrame {
         final float[] uniquePeaks;
         final float hapticPeak;
-        final VisualizerConfig config;
+        final AudioProcessor.VisualizerConfig config;
         final int configVersion;
         final long dueAtMs;
 
-        PendingFrame(float[] uniquePeaks, float hapticPeak, VisualizerConfig config, int configVersion, long dueAtMs) {
+        PendingFrame(float[] uniquePeaks, float hapticPeak, AudioProcessor.VisualizerConfig config, int configVersion, long dueAtMs) {
             this.uniquePeaks = uniquePeaks;
             this.hapticPeak = hapticPeak;
             this.config = config;
@@ -548,7 +479,7 @@ public class AudioCaptureService extends Service {
 
     public void setIdleBreathingEnabled(boolean enabled) {
         mIdleBreathingEnabled = enabled;
-        if (!enabled) mSilenceStartTimeMs = 0;
+        mGlyphRenderer.setIdleBreathingEnabled(enabled);
     }
 
     public void setNotificationFlashEnabled(boolean enabled) {
@@ -574,12 +505,10 @@ public class AudioCaptureService extends Service {
     }
 
     public void setHapticMultiplier(float multiplier) {
-        mHapticMultiplier = multiplier;
         mHapticEngine.setHapticMultiplier(multiplier);
     }
 
     public void setHapticGamma(float gamma) {
-        mHapticGamma = gamma;
         mHapticEngine.setHapticGamma(gamma);
     }
 
@@ -717,18 +646,16 @@ public class AudioCaptureService extends Service {
     }
 
     private void runCaptureLoop(AudioRecord record) {
-        VisualizerConfig initialConfig = mVisualizerConfig;
+        AudioProcessor.VisualizerConfig initialConfig = mVisualizerConfig;
         if (initialConfig == null) {
             return;
         }
 
-        // Initial FFT setup based on current latency
+        // Initial FFT setup
         mAudioProcessor.updateFFTSize(mLatencyCompensationMs);
-        float hzPerBin = mAudioProcessor.getHzPerBin();
+        float currentHzPerBin = mAudioProcessor.getHzPerBin();
         int fftSize = 4096;
-        if (mLatencyCompensationMs >= 50) fftSize = 8192;
-        if (mLatencyCompensationMs >= 100) fftSize = 16384;
-        mHapticRange = new AudioProcessor.FrequencyRange(mHapticMinHz, mHapticMaxHz, hzPerBin, fftSize);
+        mHapticRange = new AudioProcessor.FrequencyRange(mHapticMinHz, mHapticMaxHz, currentHzPerBin, fftSize);
 
         short[] hop = new short[HOP];
         ArrayDeque<PendingFrame> pendingFrames = new ArrayDeque<>();
@@ -737,23 +664,24 @@ public class AudioCaptureService extends Service {
         int appliedPresetVersion = mPresetConfigVersion;
 
         while (mCapturing && !Thread.currentThread().isInterrupted()) {
-            VisualizerConfig config = mVisualizerConfig;
+            AudioProcessor.VisualizerConfig config = mVisualizerConfig;
             int presetVersion = mPresetConfigVersion;
+            int latencyVersion = mLatencySettingsVersion;
+
             if (config == null) {
                 return;
             }
 
-            if (presetVersion != appliedPresetVersion) {
+            if (presetVersion != appliedPresetVersion || latencyVersion != appliedLatencyVersion) {
                 pendingFrames.clear();
                 appliedPresetVersion = presetVersion;
-                // Update FFT parameters based on new latency
+                appliedLatencyVersion = latencyVersion;
+
+                // Update FFT parameters
                 mAudioProcessor.updateFFTSize(mLatencyCompensationMs);
                 float hzPerBin = mAudioProcessor.getHzPerBin();
-                int fftSize = 4096;
-                if (mLatencyCompensationMs >= 50) fftSize = 8192;
-                if (mLatencyCompensationMs >= 100) fftSize = 16384;
-                mHapticRange = new AudioProcessor.FrequencyRange(mHapticMinHz, mHapticMaxHz, hzPerBin, fftSize);
-            }
+                int fftSizeInternal = 4096;
+                mHapticRange = new AudioProcessor.FrequencyRange(mHapticMinHz, mHapticMaxHz, hzPerBin, fftSizeInternal);
             }
 
             int read = record.read(hop, 0, HOP, AudioRecord.READ_BLOCKING);
@@ -774,16 +702,9 @@ public class AudioCaptureService extends Service {
                 continue; // Not enough data for FFT
             }
 
+            // If config changed while we were processing, discard and retry
             if (presetVersion != mPresetConfigVersion || config != mVisualizerConfig) {
-                pendingFrames.clear();
-                appliedPresetVersion = mPresetConfigVersion;
                 continue;
-            }
-
-            if (appliedLatencyVersion != mLatencySettingsVersion || appliedPresetVersion != presetVersion) {
-                pendingFrames.clear();
-                appliedLatencyVersion = mLatencySettingsVersion;
-                appliedPresetVersion = presetVersion;
             }
 
             float hapticPeak = mHapticEnabled ? result.hapticPeak : 0f;
@@ -813,7 +734,7 @@ public class AudioCaptureService extends Service {
         }
     }
 
-    private void processFrame(float[] uniquePeaks, float hapticPeak, VisualizerConfig config, int configVersion) {
+    private void processFrame(float[] uniquePeaks, float hapticPeak, AudioProcessor.VisualizerConfig config, int configVersion) {
         if (config == null || configVersion != mPresetConfigVersion) {
             return;
         }
@@ -869,9 +790,6 @@ public class AudioCaptureService extends Service {
     }
 
 
-    private static float clamp01(float value) {
-        return Math.max(0f, Math.min(1f, value));
-    }
 
 
 
@@ -910,7 +828,7 @@ public class AudioCaptureService extends Service {
         return availablePresetKeys.get(0);
     }
 
-    private VisualizerConfig loadVisualizerConfig(String presetKey) throws IOException, JSONException {
+    private AudioProcessor.VisualizerConfig loadVisualizerConfig(String presetKey) throws IOException, JSONException {
         JSONObject root = loadZonesConfigRoot(this);
         JSONObject preset = root.optJSONObject(presetKey);
         if (preset == null) {
@@ -926,12 +844,10 @@ public class AudioCaptureService extends Service {
                 ? preset.optDouble("decay-alpha", 0.8)
                 : root.optDouble("decay-alpha", 0.8);
 
-        ZoneSpec[] zones = parseZoneSpecs(zonesArray);
+        AudioProcessor.ZoneSpec[] zones = parseZoneSpecs(zonesArray);
 
-        // Adaptive FFT size based on latency compensation
+        // Fixed FFT size for temporal snappiness
         int fftSize = 4096;
-        if (mLatencyCompensationMs >= 50) fftSize = 8192;
-        if (mLatencyCompensationMs >= 100) fftSize = 16384;
         float hzPerBin = (float) SAMPLE_RATE / fftSize;
 
         return buildVisualizerConfig(
@@ -944,11 +860,11 @@ public class AudioCaptureService extends Service {
         );
     }
 
-    private VisualizerConfig buildVisualizerConfig(
+    private AudioProcessor.VisualizerConfig buildVisualizerConfig(
             String presetKey,
             String description,
             double decayAlpha,
-            ZoneSpec[] zones,
+            AudioProcessor.ZoneSpec[] zones,
             float hzPerBin,
             int fftSize
     ) {
@@ -956,7 +872,7 @@ public class AudioCaptureService extends Service {
         List<float[]> uniquePairs = new ArrayList<>();
         Set<String> seenPairs = new HashSet<>();
 
-        for (ZoneSpec zone : zones) {
+        for (AudioProcessor.ZoneSpec zone : zones) {
             String key = String.format(Locale.US, "%.4f|%.4f", zone.lowHz, zone.highHz);
             if (seenPairs.add(key)) {
                 uniquePairs.add(new float[]{zone.lowHz, zone.highHz});
@@ -968,18 +884,18 @@ public class AudioCaptureService extends Service {
             return lowCompare != 0 ? lowCompare : Float.compare(left[1], right[1]);
         });
 
-        FrequencyRange[] uniqueRanges = new FrequencyRange[uniquePairs.size()];
+        AudioProcessor.FrequencyRange[] uniqueRanges = new AudioProcessor.FrequencyRange[uniquePairs.size()];
         for (int i = 0; i < uniquePairs.size(); i++) {
             float[] pair = uniquePairs.get(i);
-            uniqueRanges[i] = new FrequencyRange(pair[0], pair[1], hzPerBin, fftSize);
+            uniqueRanges[i] = new AudioProcessor.FrequencyRange(pair[0], pair[1], hzPerBin, fftSize);
         }
 
         int[][] zoneToRangeIndices = new int[zones.length][];
         for (int zoneIndex = 0; zoneIndex < zones.length; zoneIndex++) {
-            ZoneSpec zone = zones[zoneIndex];
+            AudioProcessor.ZoneSpec zone = zones[zoneIndex];
             ArrayList<Integer> overlaps = new ArrayList<>();
             for (int rangeIndex = 0; rangeIndex < uniqueRanges.length; rangeIndex++) {
-                FrequencyRange range = uniqueRanges[rangeIndex];
+                AudioProcessor.FrequencyRange range = uniqueRanges[rangeIndex];
                 if (!(range.highHz < zone.lowHz || range.lowHz > zone.highHz)) {
                     overlaps.add(rangeIndex);
                 }
@@ -992,7 +908,7 @@ public class AudioCaptureService extends Service {
             zoneToRangeIndices[zoneIndex] = mapping;
         }
 
-        return new VisualizerConfig(
+        return new AudioProcessor.VisualizerConfig(
                 presetKey,
                 description,
                 adjustedDecay,
@@ -1002,8 +918,8 @@ public class AudioCaptureService extends Service {
         );
     }
 
-    private ZoneSpec[] parseZoneSpecs(JSONArray zonesArray) throws JSONException {
-        ZoneSpec[] zones = new ZoneSpec[zonesArray.length()];
+    private AudioProcessor.ZoneSpec[] parseZoneSpecs(JSONArray zonesArray) throws JSONException {
+        AudioProcessor.ZoneSpec[] zones = new AudioProcessor.ZoneSpec[zonesArray.length()];
         for (int i = 0; i < zonesArray.length(); i++) {
             JSONArray zoneArray = zonesArray.getJSONArray(i);
             float lowHz = (float) zoneArray.getDouble(0);
@@ -1014,7 +930,7 @@ public class AudioCaptureService extends Service {
                 highHz = tmp;
             }
 
-            zones[i] = new ZoneSpec(
+            zones[i] = new AudioProcessor.ZoneSpec(
                     lowHz,
                     highHz,
                     parseOptionalPercent(zoneArray, 3),
@@ -1530,13 +1446,4 @@ public class AudioCaptureService extends Service {
         return new AudioRouteInfo(routeKey, routeName);
     }
 
-    private static final class AudioRouteInfo {
-        final String storageKey;
-        final String displayName;
-
-        AudioRouteInfo(String storageKey, String displayName) {
-            this.storageKey = storageKey;
-            this.displayName = displayName;
-        }
-    }
 }

@@ -16,7 +16,7 @@ public class GlyphRenderer {
     private static final long FLASH_DURATION_MS = 200L;
 
     private final float mGamma;
-    private final boolean mIdleBreathingEnabled;
+    private boolean mIdleBreathingEnabled;
     private final boolean mNotificationFlashEnabled;
 
     private float[] mCurrentLightState = new float[0];
@@ -26,6 +26,12 @@ public class GlyphRenderer {
     private long mLastSendMs = 0L;
     private long mSilenceStartTimeMs = 0;
     private long mLastNotificationFlashMs = 0;
+
+    public GlyphRenderer(float gamma, boolean idleBreathingEnabled, boolean notificationFlashEnabled) {
+        this.mGamma = gamma;
+        this.mIdleBreathingEnabled = idleBreathingEnabled;
+        this.mNotificationFlashEnabled = notificationFlashEnabled;
+    }
 
     public void setIdleBreathingEnabled(boolean enabled) {
         mIdleBreathingEnabled = enabled;
