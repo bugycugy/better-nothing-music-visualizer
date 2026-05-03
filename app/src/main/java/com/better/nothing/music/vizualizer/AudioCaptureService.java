@@ -92,20 +92,21 @@ public class AudioCaptureService extends Service {
     private static final int SAMPLE_RATE = 44100;
     private static final int FPS = 60;
     private static final int HOP = Math.round(SAMPLE_RATE / (float) FPS);
-    private static final int ANALYSIS_WINDOW = 1102;
-    private static final int FFT_SIZE = 2048;
+    private static final int ANALYSIS_WINDOW = 2048;
+    private static final int FFT_SIZE = 4096;
     private static final float HZ_PER_BIN = (float) SAMPLE_RATE / FFT_SIZE;
 
     private static final float PEAK_FALLOFF = 0.9995f;
     private static final float SPECTRUM_GAIN = 4f;
+    private static final float SPECTRUM_LEAKAGE_FLOOR_RATIO = 0.12f;
     private static final float EPSILON = 0.000001f;
     private static final long MIN_SEND_INTERVAL_MS = 16L;
     private static final long PROJECTION_SETTLE_DELAY_MS = 500L;
     private static final int HAPTIC_STEP_MS = 4;
     private static final int HAPTIC_INPUT_FRAME_MS = 16;
-    private static final int HAPTIC_WAVEFORM_WINDOW_MS = 128;
-    private static final int HAPTIC_MIN_RESUBMIT_INTERVAL_MS = 16;
-    private static final int HAPTIC_RESUBMIT_LEAD_MS = 24;
+    private static final int HAPTIC_WAVEFORM_WINDOW_MS = 160;
+    private static final int HAPTIC_MIN_RESUBMIT_INTERVAL_MS = 32;
+    private static final int HAPTIC_RESUBMIT_LEAD_MS = 32;
     private static final long HAPTIC_DEBUG_LOG_INTERVAL_MS = 500L;
     private static final float HAPTIC_DECAY_ALPHA = 0.82f;
     private static final int HAPTIC_SILENCE_AMPLITUDE = 10;
@@ -810,11 +811,7 @@ public class AudioCaptureService extends Service {
             float hapticPeak = 0f;
             FrequencyRange hRange = mHapticRange;
             if (mHapticEnabled && hRange != null) {
-                for (int bin = hRange.binLo; bin <= hRange.binHi; bin++) {
-                    if (magnitude[bin] > hapticPeak) {
-                        hapticPeak = magnitude[bin];
-                    }
-                }
+                hapticPeak = computeRangePeak(hRange, magnitude);
             }
 
             pendingFrames.addLast(new PendingFrame(
@@ -830,17 +827,38 @@ public class AudioCaptureService extends Service {
 
     private float[] computeUniquePeaks(VisualizerConfig config, float[] magnitude) {
         float[] uniquePeaks = new float[config.uniqueRanges.length];
+        float dominantPeak = 0f;
         for (int i = 0; i < config.uniqueRanges.length; i++) {
-            FrequencyRange range = config.uniqueRanges[i];
-            float peak = 0f;
-            for (int bin = range.binLo; bin <= range.binHi; bin++) {
-                if (magnitude[bin] > peak) {
-                    peak = magnitude[bin];
-                }
-            }
+            float peak = computeRangePeak(config.uniqueRanges[i], magnitude);
             uniquePeaks[i] = peak;
+            if (peak > dominantPeak) {
+                dominantPeak = peak;
+            }
+        }
+
+        if (dominantPeak <= EPSILON) {
+            return uniquePeaks;
+        }
+
+        float leakageFloor = dominantPeak * SPECTRUM_LEAKAGE_FLOOR_RATIO;
+        for (int i = 0; i < uniquePeaks.length; i++) {
+            uniquePeaks[i] = Math.max(0f, uniquePeaks[i] - leakageFloor);
         }
         return uniquePeaks;
+    }
+
+    private float computeRangePeak(FrequencyRange range, float[] magnitude) {
+        if (range == null || magnitude == null || magnitude.length == 0) {
+            return 0f;
+        }
+
+        int start = Math.max(0, Math.min(range.binLo, magnitude.length - 1));
+        int end = Math.max(start, Math.min(range.binHi, magnitude.length - 1));
+        float peak = 0f;
+        for (int bin = start; bin <= end; bin++) {
+            peak = Math.max(peak, magnitude[bin]);
+        }
+        return peak;
     }
 
     private void dispatchDueFrames(ArrayDeque<PendingFrame> pendingFrames) {
@@ -961,7 +979,6 @@ public class AudioCaptureService extends Service {
             return;
         }
 
-        int previousAmplitude = mLastHapticSampleAmplitude;
         float current = rawPeak * SPECTRUM_GAIN * mHapticMultiplier;
         float decay = config != null ? config.decay : HAPTIC_DECAY_ALPHA;
         float risen = Math.max(mDecayedHapticState, current);
@@ -984,7 +1001,7 @@ public class AudioCaptureService extends Service {
         mLastHapticSampleAmplitude = amplitude;
 
         int stepsToAppend = consumeHapticStepsForFrame();
-        boolean changed = appendHapticAmplitude(previousAmplitude, amplitude, stepsToAppend);
+        boolean changed = appendHapticAmplitude(amplitude, stepsToAppend);
         long now = SystemClock.elapsedRealtime();
         if (isHapticBufferSilent()) {
             if (mHapticWaveformActive) {
@@ -1121,27 +1138,43 @@ public class AudioCaptureService extends Service {
         return Math.min(steps, mHapticAmplitudeBuffer.length);
     }
 
-    private boolean appendHapticAmplitude(int previousAmplitude, int amplitude, int stepsToAppend) {
-        if (mHapticAmplitudeBuffer.length == 0) {
+    private boolean appendHapticAmplitude(int amplitude, int stepsToAppend) {
+        if (stepsToAppend <= 0 || mHapticAmplitudeBuffer.length == 0) {
             return false;
         }
 
         boolean changed = false;
-        for (int i = 0; i < mHapticAmplitudeBuffer.length; i++) {
-            int nextAmplitude;
-            if (i < stepsToAppend) {
-                float t = (float) (i + 1) / (float) stepsToAppend;
-                nextAmplitude = Math.round(previousAmplitude + ((amplitude - previousAmplitude) * t));
-            } else {
-                nextAmplitude = amplitude;
-            }
+        int stepCount = mHapticAmplitudeBuffer.length;
 
-            nextAmplitude = Math.max(0, Math.min(255, nextAmplitude));
-            if (mHapticAmplitudeBuffer[i] != nextAmplitude) {
-                changed = true;
-                mHapticAmplitudeBuffer[i] = nextAmplitude;
+        if (stepsToAppend >= stepCount) {
+            for (int i = 0; i < stepCount; i++) {
+                if (mHapticAmplitudeBuffer[i] != amplitude) {
+                    changed = true;
+                    break;
+                }
             }
+            if (changed) {
+                Arrays.fill(mHapticAmplitudeBuffer, amplitude);
+            }
+            return changed;
         }
+
+        int retained = stepCount - stepsToAppend;
+        for (int i = 0; i < retained; i++) {
+            int next = mHapticAmplitudeBuffer[i + stepsToAppend];
+            if (mHapticAmplitudeBuffer[i] != next) {
+                changed = true;
+            }
+            mHapticAmplitudeBuffer[i] = next;
+        }
+
+        for (int i = retained; i < stepCount; i++) {
+            if (mHapticAmplitudeBuffer[i] != amplitude) {
+                changed = true;
+            }
+            mHapticAmplitudeBuffer[i] = amplitude;
+        }
+
         return changed;
     }
 
@@ -1854,8 +1887,10 @@ public class AudioCaptureService extends Service {
 
     private static float[] buildHannWindow() {
         float[] hann = new float[ANALYSIS_WINDOW];
+        double denom = Math.max(1d, ANALYSIS_WINDOW - 1d);
         for (int i = 0; i < ANALYSIS_WINDOW; i++) {
-            hann[i] = 0.5f * (1f - (float) Math.cos((2d * Math.PI * i) / ANALYSIS_WINDOW));
+            double phase = (2d * Math.PI * i) / denom;
+            hann[i] = (float) (0.5d * (1d - Math.cos(phase)));
         }
         return hann;
     }

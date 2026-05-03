@@ -1302,10 +1302,10 @@ private fun BetterVizApp(
                         .graphicsLayer {
                             val fraction = 1f - pageOffset.coerceIn(0f, 1f)
                             // Your signature bouncy scaling
-                            val scale = 0.95f + (1f - 0.95f) * fraction
+                            val scale = 0.8f + (1f - 0.8f) * fraction
                             scaleX = scale
                             scaleY = scale
-                            alpha = 0.5f + (1f - 0.5f) * fraction
+                            alpha = 0.4f + (1f - 0.4f) * fraction
                         }
                 ) {
                     when (currentTab) {

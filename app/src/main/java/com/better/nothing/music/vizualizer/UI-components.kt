@@ -263,7 +263,7 @@ fun NativeBottomBar(
                 icon = {
                     when (tab) {
                         Tab.Audio -> Icon(Icons.AutoMirrored.Filled.VolumeUp, tab.label)
-                        Tab.Glyphs -> GlyphNavIcon()
+                        Tab.Glyphs -> Icon(painter = painterResource(R.drawable.ic_nav_glyphs), contentDescription = tab.label)
                         Tab.Haptics -> Icon(Icons.Filled.Vibration, tab.label)
                         Tab.Settings -> Icon(Icons.Filled.Settings, tab.label)
                         Tab.About -> Icon(Icons.Filled.Info, tab.label)
@@ -278,27 +278,6 @@ fun NativeBottomBar(
                 )
             )
         }
-    }
-}
-
-@Composable
-private fun GlyphNavIcon() {
-    Box(
-        modifier = Modifier.size(24.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Image(
-            painter = painterResource(R.drawable.ic_nav_glyphs),
-            contentDescription = null,
-            contentScale = ContentScale.FillBounds,
-            colorFilter = ColorFilter.tint(LocalContentColor.current),
-            modifier = Modifier
-                .width(14.dp)
-                .height(14.dp)
-                .graphicsLayer {
-                    scaleY = 1.3f
-                }
-        )
     }
 }
 
