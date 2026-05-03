@@ -963,10 +963,6 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
     private fun requestProjection() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-            launchProjection()
-            return
-        }
         if (ContextCompat.checkSelfPermission(
                 this, Manifest.permission.POST_NOTIFICATIONS
             ) != PackageManager.PERMISSION_GRANTED
@@ -1283,7 +1279,12 @@ private fun BetterVizApp(
             )
         },
     ) { innerPadding ->
-        Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+        val bottomPadding = innerPadding.calculateBottomPadding()
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(bottom = bottomPadding)
+        ) {
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),

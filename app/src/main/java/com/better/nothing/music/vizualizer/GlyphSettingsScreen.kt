@@ -74,7 +74,7 @@ internal fun GlyphsScreen(
             .animateContentSize(spring(stiffness = Spring.StiffnessLow)),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(50.dp))
 
         ScreenTitle(text = stringResource(R.string.glyph_controls))
 
