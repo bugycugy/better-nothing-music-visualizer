@@ -73,7 +73,6 @@ import androidx.compose.animation.core.EaseOutQuart
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
@@ -85,12 +84,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -111,6 +108,7 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlin.math.absoluteValue
+import kotlin.math.sqrt
 
 
 // ─── Tab ─────────────────────────────────────────────────────────────────────
@@ -238,10 +236,8 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     private val _connectedDeviceKey = MutableStateFlow<String?>(null)
 
     private val _glyphTabEnabled = MutableStateFlow(true)
-    val glyphTabEnabled = _glyphTabEnabled.asStateFlow()
 
     private val _hapticsTabEnabled = MutableStateFlow(true)
-    val hapticsTabEnabled = _hapticsTabEnabled.asStateFlow()
 
     private val _idleBreathingEnabled = MutableStateFlow(false)
     val idleBreathingEnabled = _idleBreathingEnabled.asStateFlow()
@@ -289,7 +285,9 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         // This runs on Dispatchers.IO (called from withContext(IO) above)
         return try {
             val url = URL("https://raw.githubusercontent.com/Aleks-Levet/better-nothing-music-visualizer/main/zones.config")
-            val connection = url.openConnection() as HttpURLConnection
+            val connection = withContext(Dispatchers.IO) {
+                url.openConnection()
+            } as HttpURLConnection
             connection.connectTimeout = 10000
             connection.readTimeout = 10000
 
@@ -457,7 +455,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
             launch(Dispatchers.IO) {
                 // Force update on first run if config is missing
                 val internalFile = File(ctx.filesDir, "zones.config")
-                val hasAsset = try { ctx.assets.open("zones.config").use { true } } catch (e: Exception) { false }
+                val hasAsset = try { ctx.assets.open("zones.config").use { true } } catch (_: Exception) { false }
 
                 if (!internalFile.exists() && !hasAsset) {
                     performUpdateAction()
@@ -950,7 +948,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
         val gY = y / SensorManager.GRAVITY_EARTH
         val gZ = z / SensorManager.GRAVITY_EARTH
 
-        val gForce = Math.sqrt((gX * gX + gY * gY + gZ * gZ).toDouble()).toFloat()
+        val gForce = sqrt((gX * gX + gY * gY + gZ * gZ).toDouble()).toFloat()
 
         if (gForce > SHAKE_THRESHOLD) {
             val now = System.currentTimeMillis()
