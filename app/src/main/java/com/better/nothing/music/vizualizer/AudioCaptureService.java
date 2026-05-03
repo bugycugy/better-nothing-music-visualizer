@@ -101,11 +101,10 @@ public class AudioCaptureService extends Service {
     private static final float EPSILON = 0.000001f;
     private static final long MIN_SEND_INTERVAL_MS = 16L;
     private static final long PROJECTION_SETTLE_DELAY_MS = 500L;
-    private static final int HAPTIC_STEP_MS = 5;
+    private static final int HAPTIC_STEP_MS = 4;
     private static final int HAPTIC_INPUT_FRAME_MS = 16;
-    private static final int HAPTIC_BASE_WINDOW_MS = 80;
-    private static final int HAPTIC_MAX_WINDOW_MS = 200;
-    private static final int HAPTIC_LATENCY_PADDING_MS = 32;
+    private static final int HAPTIC_WAVEFORM_WINDOW_MS = 96;
+    private static final int HAPTIC_MIN_RESUBMIT_INTERVAL_MS = 16;
     private static final int HAPTIC_RESUBMIT_LEAD_MS = 24;
     private static final long HAPTIC_DEBUG_LOG_INTERVAL_MS = 500L;
     private static final float HAPTIC_DECAY_ALPHA = 0.82f;
@@ -995,7 +994,11 @@ public class AudioCaptureService extends Service {
         }
 
         boolean submitted = false;
-        if (!mHapticWaveformActive || changed || shouldRefreshHapticWaveform(now)) {
+        boolean keepAlive = shouldRefreshHapticWaveform(now);
+        boolean canResubmitForChange = changed
+                && ((now - mLastHapticSubmitMs) >= HAPTIC_MIN_RESUBMIT_INTERVAL_MS);
+
+        if (!mHapticWaveformActive || keepAlive || canResubmitForChange) {
             submitHapticWaveform();
             submitted = true;
         }
@@ -1082,10 +1085,7 @@ public class AudioCaptureService extends Service {
     }
 
     private void ensureHapticBufferCapacity() {
-        int targetWindowMs = Math.max(
-                HAPTIC_BASE_WINDOW_MS,
-                Math.min(HAPTIC_MAX_WINDOW_MS, mLatencyCompensationMs + HAPTIC_LATENCY_PADDING_MS)
-        );
+        int targetWindowMs = HAPTIC_WAVEFORM_WINDOW_MS;
         int targetStepCount = Math.max(1, (targetWindowMs + (HAPTIC_STEP_MS - 1)) / HAPTIC_STEP_MS);
         if (mHapticAmplitudeBuffer.length == targetStepCount && mHapticTimingBuffer.length == targetStepCount) {
             return;
@@ -1121,41 +1121,17 @@ public class AudioCaptureService extends Service {
     }
 
     private boolean appendHapticAmplitude(int amplitude, int stepsToAppend) {
-        if (stepsToAppend <= 0 || mHapticAmplitudeBuffer.length == 0) {
+        if (mHapticAmplitudeBuffer.length == 0) {
             return false;
         }
 
         boolean changed = false;
-        int stepCount = mHapticAmplitudeBuffer.length;
-
-        if (stepsToAppend >= stepCount) {
-            for (int i = 0; i < stepCount; i++) {
-                if (mHapticAmplitudeBuffer[i] != amplitude) {
-                    changed = true;
-                    break;
-                }
-            }
-            if (changed) {
-                Arrays.fill(mHapticAmplitudeBuffer, amplitude);
-            }
-            return changed;
-        }
-
-        int retained = stepCount - stepsToAppend;
-        for (int i = 0; i < retained; i++) {
-            int next = mHapticAmplitudeBuffer[i + stepsToAppend];
-            if (mHapticAmplitudeBuffer[i] != next) {
-                changed = true;
-            }
-            mHapticAmplitudeBuffer[i] = next;
-        }
-        for (int i = retained; i < stepCount; i++) {
+        for (int i = 0; i < mHapticAmplitudeBuffer.length; i++) {
             if (mHapticAmplitudeBuffer[i] != amplitude) {
                 changed = true;
+                mHapticAmplitudeBuffer[i] = amplitude;
             }
-            mHapticAmplitudeBuffer[i] = amplitude;
         }
-
         return changed;
     }
 

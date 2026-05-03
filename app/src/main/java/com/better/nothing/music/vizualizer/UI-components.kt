@@ -233,7 +233,7 @@ fun NativeBottomBar(
 ) {
     NavigationBar(
         modifier = Modifier
-            .heightIn(min = 80.dp)
+            .heightIn(min = 50.dp)
             .animateContentSize(
                 animationSpec = spring(
                     dampingRatio = Spring.DampingRatioMediumBouncy,
@@ -290,11 +290,14 @@ private fun GlyphNavIcon() {
         Image(
             painter = painterResource(R.drawable.ic_nav_glyphs),
             contentDescription = null,
-            contentScale = ContentScale.Fit,
+            contentScale = ContentScale.FillBounds,
             colorFilter = ColorFilter.tint(LocalContentColor.current),
             modifier = Modifier
-                .width(12.dp)
-                .height(24.dp)
+                .width(16.dp)
+                .height(16.dp)
+                .graphicsLayer {
+                    scaleY = 1.5f
+                }
         )
     }
 }
