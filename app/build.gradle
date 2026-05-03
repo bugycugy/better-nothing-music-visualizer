@@ -13,8 +13,8 @@ android {
         applicationId "com.better.nothing.music.vizualizer"
         minSdk 34
         targetSdk 36
-        versionCode 5
-        versionName '2.9'
+        versionCode 6
+        versionName '3.0'
     }
 
     buildTypes {
@@ -26,6 +26,8 @@ android {
         debug {
             debuggable true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            versionNameSuffix '.debug'
+            applicationIdSuffix '.debug'
         }
     }
 
@@ -52,10 +54,10 @@ dependencies {
     implementation fileTree(dir: 'libs', include: ['*.aar', '*.jar'])
 
     // FFT Library for better accuracy
-    implementation 'com.github.wendykierp:JTransforms:3.1'
+    implementation 'com.github.wendykierp:JTransforms:3.2'
 
     // 2. Compose BOM - Manages versions for all compose libs below
-    implementation platform('androidx.compose:compose-bom:2026.03.01')
+    implementation platform('androidx.compose:compose-bom:2026.04.01')
 
     // 3. Core Compose Libraries (Versions handled by BOM)
     implementation 'androidx.compose.ui:ui'
@@ -77,9 +79,9 @@ dependencies {
     // 7. Legacy Support (Only if your Service/Activity extends AppCompatActivity)
     // If you use 'ComponentActivity', you can likely remove appcompat too.
     implementation 'androidx.appcompat:appcompat:1.7.1'
-    implementation 'androidx.compose.foundation:foundation-layout:1.10.6'
+    implementation 'androidx.compose.foundation:foundation-layout:1.11.0'
     implementation 'androidx.benchmark:benchmark-traceprocessor:1.4.1'
-    implementation 'androidx.compose.runtime:runtime:1.10.6'
+    implementation 'androidx.compose.runtime:runtime:1.11.0'
     implementation 'androidx.compose.foundation:foundation-layout:1.11.0'
     implementation 'androidx.compose.animation:animation-core:1.11.0'
 
