@@ -1,6 +1,5 @@
 package com.better.nothing.music.vizualizer;
 
-import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -33,13 +32,13 @@ import android.os.VibratorManager;
 import android.service.quicksettings.TileService;
 import android.util.Log;
 
-import androidx.annotation.RequiresPermission;
 import androidx.core.app.NotificationCompat;
 
 import com.nothing.ketchum.Common;
 import com.nothing.ketchum.GlyphException;
 import com.nothing.ketchum.GlyphManager;
 
+import org.jtransforms.fft.DoubleFFT_1D;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -107,7 +106,6 @@ public class AudioCaptureService extends Service {
     private static final int HAPTIC_WAVEFORM_WINDOW_MS = 160;
     private static final int HAPTIC_MIN_RESUBMIT_INTERVAL_MS = 32;
     private static final int HAPTIC_RESUBMIT_LEAD_MS = 32;
-    private static final long HAPTIC_DEBUG_LOG_INTERVAL_MS = 500L;
     private static final float HAPTIC_DECAY_ALPHA = 0.82f;
     private static final int HAPTIC_SILENCE_AMPLITUDE = 10;
 
@@ -203,7 +201,6 @@ public class AudioCaptureService extends Service {
     private int mHapticFrameRemainderMs = 0;
     private boolean mHapticWaveformActive = false;
     private long mLastHapticSubmitMs = 0L;
-    private long mLastHapticDebugLogMs = 0L;
     private int[] mHapticAmplitudeBuffer = new int[0];
     private long[] mHapticTimingBuffer = new long[0];
     private VibratorManager mVibratorManager;
@@ -227,23 +224,12 @@ public class AudioCaptureService extends Service {
         }
     };
 
-    private static final class ZoneSpec {
-        final float lowHz;
-        final float highHz;
-        final float lowPercent;
-        final float highPercent;
-
-        ZoneSpec(float lowHz, float highHz, float lowPercent, float highPercent) {
-            this.lowHz = lowHz;
-            this.highHz = highHz;
-            this.lowPercent = lowPercent;
-            this.highPercent = highPercent;
-        }
+    private record ZoneSpec(float lowHz, float highHz, float lowPercent, float highPercent) {
 
         boolean hasPercentSlice() {
-            return !Float.isNaN(lowPercent) && !Float.isNaN(highPercent);
+                return !Float.isNaN(lowPercent) && !Float.isNaN(highPercent);
+            }
         }
-    }
 
     private static final class FrequencyRange {
         final float lowHz;
@@ -259,45 +245,13 @@ public class AudioCaptureService extends Service {
         }
     }
 
-    private static final class VisualizerConfig {
-        final String presetKey;
-        final String description;
-        final float decay;
-        final ZoneSpec[] zones;
-        final FrequencyRange[] uniqueRanges;
-        final int[][] zoneToRangeIndices;
-
-        VisualizerConfig(
-                String presetKey,
-                String description,
-                float decay,
-                ZoneSpec[] zones,
-                FrequencyRange[] uniqueRanges,
-                int[][] zoneToRangeIndices
-        ) {
-            this.presetKey = presetKey;
-            this.description = description;
-            this.decay = decay;
-            this.zones = zones;
-            this.uniqueRanges = uniqueRanges;
-            this.zoneToRangeIndices = zoneToRangeIndices;
-        }
+    private record VisualizerConfig(String presetKey, String description, float decay,
+                                    ZoneSpec[] zones, FrequencyRange[] uniqueRanges,
+                                    int[][] zoneToRangeIndices) {
     }
 
-    private static final class PendingFrame {
-        final float[] uniquePeaks;
-        final float hapticPeak;
-        final VisualizerConfig config;
-        final int configVersion;
-        final long dueAtMs;
-
-        PendingFrame(float[] uniquePeaks, float hapticPeak, VisualizerConfig config, int configVersion, long dueAtMs) {
-            this.uniquePeaks = uniquePeaks;
-            this.hapticPeak = hapticPeak;
-            this.config = config;
-            this.configVersion = configVersion;
-            this.dueAtMs = dueAtMs;
-        }
+    private record PendingFrame(float[] uniquePeaks, float hapticPeak, VisualizerConfig config,
+                                int configVersion, long dueAtMs) {
     }
 
     public static final class PresetInfo {
@@ -328,12 +282,9 @@ public class AudioCaptureService extends Service {
             mAudioManager.registerAudioDeviceCallback(mAudioDeviceCallback, mWorkerHandler);
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            mVibratorManager = getSystemService(VibratorManager.class);
-        }
-        mVibrator = mVibratorManager != null
-                ? mVibratorManager.getDefaultVibrator()
-                : (Vibrator) getSystemService(VIBRATOR_SERVICE);
+        mVibratorManager = getSystemService(VibratorManager.class);
+        VibratorManager vm = getSystemService(VibratorManager.class);
+        mVibrator = vm.getDefaultVibrator();
         ensureHapticBufferCapacity();
 
         mSelectedDevice = DeviceProfile.detectDevice();
@@ -744,10 +695,10 @@ public class AudioCaptureService extends Service {
         float[] hann = buildHannWindow();
         float[] ring = new float[ANALYSIS_WINDOW];
         short[] hop = new short[HOP];
-        float[] re = new float[FFT_SIZE];
-        float[] im = new float[FFT_SIZE];
+        double[] fftData = new double[FFT_SIZE * 2]; // JTransforms needs double array, 2x size for complex
         float[] magnitude = new float[(FFT_SIZE / 2) + 1];
         ArrayDeque<PendingFrame> pendingFrames = new ArrayDeque<>();
+        DoubleFFT_1D fft = new DoubleFFT_1D(FFT_SIZE);
 
         int appliedLatencyVersion = mLatencySettingsVersion;
         int appliedPresetVersion = mPresetConfigVersion;
@@ -783,15 +734,17 @@ public class AudioCaptureService extends Service {
                 continue;
             }
 
-            Arrays.fill(re, 0f);
-            Arrays.fill(im, 0f);
+            Arrays.fill(fftData, 0d);
             for (int i = 0; i < ANALYSIS_WINDOW; i++) {
-                re[i] = ring[(ringPosition + i) % ANALYSIS_WINDOW] * hann[i];
+                fftData[2 * i] = ring[(ringPosition + i) % ANALYSIS_WINDOW] * hann[i]; // real part
+                // imaginary part remains 0
             }
 
-            fft(re, im);
+            fft.realForwardFull(fftData);
             for (int i = 0; i <= FFT_SIZE / 2; i++) {
-                magnitude[i] = (float) Math.hypot(re[i], im[i]);
+                double re = fftData[2 * i];
+                double im = fftData[2 * i + 1];
+                magnitude[i] = (float) Math.hypot(re, im);
             }
 
             if (presetVersion != mPresetConfigVersion || config != mVisualizerConfig) {
@@ -994,33 +947,20 @@ public class AudioCaptureService extends Service {
 
         float shaped = (float) Math.pow(normalized, mHapticGamma);
         int amplitude = Math.round(shaped * 255f);
-        amplitude = Math.max(0, Math.min(255, amplitude));
-        if (amplitude < HAPTIC_SILENCE_AMPLITUDE) {
-            amplitude = 0;
-        }
+        amplitude = Math.max(HAPTIC_SILENCE_AMPLITUDE, Math.min(255, amplitude)); // Ensure minimum amplitude for continuous vibration
         mLastHapticSampleAmplitude = amplitude;
 
         int stepsToAppend = consumeHapticStepsForFrame();
         boolean changed = appendHapticAmplitude(amplitude, stepsToAppend);
         long now = SystemClock.elapsedRealtime();
-        if (isHapticBufferSilent()) {
-            if (mHapticWaveformActive) {
-                stopHapticWaveform();
-            }
-            logHapticDebug(now, rawPeak, current, normalized, amplitude, stepsToAppend, changed, true, false);
-            return;
-        }
 
-        boolean submitted = false;
         boolean keepAlive = shouldRefreshHapticWaveform(now);
         boolean canResubmitForChange = changed
                 && ((now - mLastHapticSubmitMs) >= HAPTIC_MIN_RESUBMIT_INTERVAL_MS);
 
         if (!mHapticWaveformActive || keepAlive || canResubmitForChange) {
             submitHapticWaveform();
-            submitted = true;
         }
-        logHapticDebug(now, rawPeak, current, normalized, amplitude, stepsToAppend, changed, false, submitted);
     }
 
     public float[] getCurrentLightState() {
@@ -1103,8 +1043,7 @@ public class AudioCaptureService extends Service {
     }
 
     private void ensureHapticBufferCapacity() {
-        int targetWindowMs = HAPTIC_WAVEFORM_WINDOW_MS;
-        int targetStepCount = Math.max(1, (targetWindowMs + (HAPTIC_STEP_MS - 1)) / HAPTIC_STEP_MS);
+        int targetStepCount = Math.max(1, (HAPTIC_WAVEFORM_WINDOW_MS + (HAPTIC_STEP_MS - 1)) / HAPTIC_STEP_MS);
         if (mHapticAmplitudeBuffer.length == targetStepCount && mHapticTimingBuffer.length == targetStepCount) {
             return;
         }
@@ -1147,8 +1086,8 @@ public class AudioCaptureService extends Service {
         int stepCount = mHapticAmplitudeBuffer.length;
 
         if (stepsToAppend >= stepCount) {
-            for (int i = 0; i < stepCount; i++) {
-                if (mHapticAmplitudeBuffer[i] != amplitude) {
+            for (int j : mHapticAmplitudeBuffer) {
+                if (j != amplitude) {
                     changed = true;
                     break;
                 }
@@ -1176,15 +1115,6 @@ public class AudioCaptureService extends Service {
         }
 
         return changed;
-    }
-
-    private boolean isHapticBufferSilent() {
-        for (int amplitude : mHapticAmplitudeBuffer) {
-            if (amplitude > 0) {
-                return false;
-            }
-        }
-        return true;
     }
 
     private boolean shouldRefreshHapticWaveform(long now) {
@@ -1228,66 +1158,6 @@ public class AudioCaptureService extends Service {
         }
     }
 
-    private void logHapticDebug(
-            long now,
-            float rawPeak,
-            float current,
-            float normalized,
-            int amplitude,
-            int stepsToAppend,
-            boolean changed,
-            boolean silent,
-            boolean submitted
-    ) {
-        if ((now - mLastHapticDebugLogMs) < HAPTIC_DEBUG_LOG_INTERVAL_MS) {
-            return;
-        }
-        mLastHapticDebugLogMs = now;
-
-        int min = Integer.MAX_VALUE;
-        int max = Integer.MIN_VALUE;
-        int nonZero = 0;
-        int first = mHapticAmplitudeBuffer.length > 0 ? mHapticAmplitudeBuffer[0] : -1;
-        int last = mHapticAmplitudeBuffer.length > 0 ? mHapticAmplitudeBuffer[mHapticAmplitudeBuffer.length - 1] : -1;
-
-        for (int value : mHapticAmplitudeBuffer) {
-            min = Math.min(min, value);
-            max = Math.max(max, value);
-            if (value > 0) {
-                nonZero++;
-            }
-        }
-
-        if (mHapticAmplitudeBuffer.length == 0) {
-            min = -1;
-            max = -1;
-        }
-
-        Log.d(
-                TAG,
-                "HAPTIC"
-                        + " raw=" + rawPeak
-                        + " current=" + current
-                        + " decayed=" + mDecayedHapticState
-                        + " peak=" + mHapticPeakTracker
-                        + " norm=" + normalized
-                        + " gamma=" + mHapticGamma
-                        + " mul=" + mHapticMultiplier
-                        + " amp=" + amplitude
-                        + " steps=" + stepsToAppend
-                        + " changed=" + changed
-                        + " silent=" + silent
-                        + " submitted=" + submitted
-                        + " active=" + mHapticWaveformActive
-                        + " bufLen=" + mHapticAmplitudeBuffer.length
-                        + " bufMin=" + min
-                        + " bufMax=" + max
-                        + " bufFirst=" + first
-                        + " bufLast=" + last
-                        + " nonZero=" + nonZero
-                        + " sinceSubmit=" + (now - mLastHapticSubmitMs)
-        );
-    }
 
     private void stopHapticWaveform() {
         if (!mHapticWaveformActive) {
@@ -1895,58 +1765,6 @@ public class AudioCaptureService extends Service {
         return hann;
     }
 
-    private static void fft(float[] re, float[] im) {
-        int j = 0;
-        for (int i = 1; i < FFT_SIZE; i++) {
-            int bit = FFT_SIZE >> 1;
-            while ((j & bit) != 0) {
-                j ^= bit;
-                bit >>= 1;
-            }
-            j ^= bit;
-            if (i < j) {
-                float reTmp = re[i];
-                re[i] = re[j];
-                re[j] = reTmp;
-
-                float imTmp = im[i];
-                im[i] = im[j];
-                im[j] = imTmp;
-            }
-        }
-
-        for (int len = 2; len <= FFT_SIZE; len <<= 1) {
-            double angle = (-2d * Math.PI) / len;
-            float wr = (float) Math.cos(angle);
-            float wi = (float) Math.sin(angle);
-
-            for (int i = 0; i < FFT_SIZE; i += len) {
-                float cr = 1f;
-                float ci = 0f;
-                for (int k = 0; k < len / 2; k++) {
-                    float ur = re[i + k];
-                    float ui = im[i + k];
-                    float vr = (re[i + k + (len / 2)] * cr) - (im[i + k + (len / 2)] * ci);
-                    float vi = (re[i + k + (len / 2)] * ci) + (im[i + k + (len / 2)] * cr);
-
-                    re[i + k] = ur + vr;
-                    im[i + k] = ui + vi;
-                    re[i + k + (len / 2)] = ur - vr;
-                    im[i + k + (len / 2)] = ui - vi;
-
-                    float nextCr = (cr * wr) - (ci * wi);
-                    ci = (cr * wi) + (ci * wr);
-                    cr = nextCr;
-                }
-            }
-        }
-    }
-
-    public String getCurrentDeviceName() {
-        AudioRouteInfo routeInfo = resolveCurrentAudioRoute();
-        return routeInfo != null ? routeInfo.displayName : "Internal Speaker";
-    }
-
     private void refreshLatencyForCurrentAudioRoute() {
         SharedPreferences appPreferences = getSharedPreferences(APP_PREFS_NAME, Context.MODE_PRIVATE);
         if (!appPreferences.getBoolean("auto_device_enabled", true)) {
@@ -2021,7 +1839,7 @@ public class AudioCaptureService extends Service {
 
         String address = device.getAddress();
         String normalizedAddress = null;
-        if (address != null && !address.isBlank()) {
+        if (!address.isBlank()) {
             normalizedAddress = address.toLowerCase(Locale.US)
                     .replaceAll("[^a-z0-9._-]+", "_")
                     .replaceAll("^_+|_+$", "");
@@ -2033,13 +1851,6 @@ public class AudioCaptureService extends Service {
         return new AudioRouteInfo(routeKey, routeName);
     }
 
-    private static final class AudioRouteInfo {
-        final String storageKey;
-        final String displayName;
-
-        AudioRouteInfo(String storageKey, String displayName) {
-            this.storageKey = storageKey;
-            this.displayName = displayName;
-        }
+    private record AudioRouteInfo(String storageKey, String displayName) {
     }
 }

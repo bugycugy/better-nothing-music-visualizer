@@ -51,6 +51,9 @@ dependencies {
     // 1. Keep your local SDK
     implementation fileTree(dir: 'libs', include: ['*.aar', '*.jar'])
 
+    // FFT Library for better accuracy
+    implementation 'com.github.wendykierp:JTransforms:3.1'
+
     // 2. Compose BOM - Manages versions for all compose libs below
     implementation platform('androidx.compose:compose-bom:2026.03.01')
 
