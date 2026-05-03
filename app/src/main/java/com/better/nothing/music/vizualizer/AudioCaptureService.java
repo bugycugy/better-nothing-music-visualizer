@@ -103,7 +103,7 @@ public class AudioCaptureService extends Service {
     private static final long PROJECTION_SETTLE_DELAY_MS = 500L;
     private static final int HAPTIC_STEP_MS = 4;
     private static final int HAPTIC_INPUT_FRAME_MS = 16;
-    private static final int HAPTIC_WAVEFORM_WINDOW_MS = 96;
+    private static final int HAPTIC_WAVEFORM_WINDOW_MS = 128;
     private static final int HAPTIC_MIN_RESUBMIT_INTERVAL_MS = 16;
     private static final int HAPTIC_RESUBMIT_LEAD_MS = 24;
     private static final long HAPTIC_DEBUG_LOG_INTERVAL_MS = 500L;
@@ -961,6 +961,7 @@ public class AudioCaptureService extends Service {
             return;
         }
 
+        int previousAmplitude = mLastHapticSampleAmplitude;
         float current = rawPeak * SPECTRUM_GAIN * mHapticMultiplier;
         float decay = config != null ? config.decay : HAPTIC_DECAY_ALPHA;
         float risen = Math.max(mDecayedHapticState, current);
@@ -983,7 +984,7 @@ public class AudioCaptureService extends Service {
         mLastHapticSampleAmplitude = amplitude;
 
         int stepsToAppend = consumeHapticStepsForFrame();
-        boolean changed = appendHapticAmplitude(amplitude, stepsToAppend);
+        boolean changed = appendHapticAmplitude(previousAmplitude, amplitude, stepsToAppend);
         long now = SystemClock.elapsedRealtime();
         if (isHapticBufferSilent()) {
             if (mHapticWaveformActive) {
@@ -1120,16 +1121,25 @@ public class AudioCaptureService extends Service {
         return Math.min(steps, mHapticAmplitudeBuffer.length);
     }
 
-    private boolean appendHapticAmplitude(int amplitude, int stepsToAppend) {
+    private boolean appendHapticAmplitude(int previousAmplitude, int amplitude, int stepsToAppend) {
         if (mHapticAmplitudeBuffer.length == 0) {
             return false;
         }
 
         boolean changed = false;
         for (int i = 0; i < mHapticAmplitudeBuffer.length; i++) {
-            if (mHapticAmplitudeBuffer[i] != amplitude) {
+            int nextAmplitude;
+            if (i < stepsToAppend) {
+                float t = (float) (i + 1) / (float) stepsToAppend;
+                nextAmplitude = Math.round(previousAmplitude + ((amplitude - previousAmplitude) * t));
+            } else {
+                nextAmplitude = amplitude;
+            }
+
+            nextAmplitude = Math.max(0, Math.min(255, nextAmplitude));
+            if (mHapticAmplitudeBuffer[i] != nextAmplitude) {
                 changed = true;
-                mHapticAmplitudeBuffer[i] = amplitude;
+                mHapticAmplitudeBuffer[i] = nextAmplitude;
             }
         }
         return changed;
