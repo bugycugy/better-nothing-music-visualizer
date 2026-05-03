@@ -476,6 +476,9 @@ public class AudioCaptureService extends Service {
 
     public void setGamma(float gamma) {
         mGamma = gamma;
+        if (mGlyphRenderer != null) {
+            mGlyphRenderer.setGamma(gamma);
+        }
     }
 
     public void setIdleBreathingEnabled(boolean enabled) {

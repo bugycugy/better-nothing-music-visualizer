@@ -15,7 +15,7 @@ public class GlyphRenderer {
     private static final long BREATH_PERIOD_MS = 5000L;
     private static final long FLASH_DURATION_MS = 200L;
 
-    private final float mGamma;
+    private float mGamma;
     private boolean mIdleBreathingEnabled;
     private final boolean mNotificationFlashEnabled;
 
@@ -38,6 +38,11 @@ public class GlyphRenderer {
         if (!enabled) {
             mSilenceStartTimeMs = 0;
         }
+    }
+
+    public void setGamma(float gamma) {
+        mGamma = gamma;
+        mLastHash = Integer.MIN_VALUE; // Force redraw with new gamma
     }
 
     public void resetState(AudioProcessor.VisualizerConfig config) {

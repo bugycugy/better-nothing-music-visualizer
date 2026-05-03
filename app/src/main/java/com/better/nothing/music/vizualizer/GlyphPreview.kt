@@ -2,24 +2,33 @@ package com.better.nothing.music.vizualizer
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import kotlin.math.min
 
 @Composable
@@ -28,8 +37,51 @@ fun GlyphPreview(
     device: Int,
     modifier: Modifier = Modifier
 ) {
-    val color = MaterialTheme.colorScheme.primary
-    val baseOpacity = 0.15f
+    var isFullScreen by remember { mutableStateOf(false) }
+
+    val content = @Composable { m: Modifier ->
+        GlyphPreviewContent(
+            vizState = vizState,
+            device = device,
+            modifier = m.clickable { isFullScreen = !isFullScreen }
+        )
+    }
+
+    if (isFullScreen) {
+        Dialog(
+            onDismissRequest = { isFullScreen = false },
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false
+            )
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+                    .clickable { isFullScreen = false },
+                contentAlignment = Alignment.Center
+            ) {
+                GlyphPreviewContent(
+                    vizState = vizState,
+                    device = device,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+    } else {
+        content(modifier)
+    }
+}
+
+@Composable
+fun GlyphPreviewContent(
+    vizState: FloatArray,
+    device: Int,
+    modifier: Modifier = Modifier
+) {
+    val color = Color.White
+    val baseOpacity = 0.10f
     val renderState = vizState
 
     val parser = remember { PathParser() }
@@ -79,7 +131,7 @@ fun GlyphPreview(
         modifier = modifier
             .padding(horizontal = 4.dp)
             .clip(RoundedCornerShape(40.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .background(Color(0xFF1A1A1A))
             .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -96,6 +148,21 @@ fun GlyphPreview(
                 return baseOpacity + (value * (1f - baseOpacity))
             }
 
+            fun drawGlyphPath(path: Path, alpha: Float) {
+                if (alpha > baseOpacity + 0.05f) {
+                    drawIntoCanvas { canvas ->
+                        val paint = Paint().asFrameworkPaint().apply {
+                            this.color = android.graphics.Color.WHITE
+                            setShadowLayer(15f * scale, 0f, 0f, android.graphics.Color.WHITE)
+                            this.alpha = (alpha * 255).toInt()
+                        }
+                        canvas.nativeCanvas.drawPath(path.asAndroidPath(), paint)
+                    }
+                } else {
+                    drawPath(path, color.copy(alpha = alpha))
+                }
+            }
+
             withTransform({
                 translate(dx, dy)
                 scale(scale, scale, pivot = Offset.Zero)
@@ -103,36 +170,36 @@ fun GlyphPreview(
                 when (device) {
                     DeviceProfile.DEVICE_NP1 -> {
                         if (renderState.size <= 5) {
-                            paths["p1_cam"]?.let { drawPath(it, color.copy(alpha = getA(0))) }
-                            paths["p1_slash"]?.let { drawPath(it, color.copy(alpha = getA(1))) }
-                            paths["p1s_ring"]?.let { drawPath(it, color.copy(alpha = getA(2))) }
-                            paths["p1_battery"]?.let { drawPath(it, color.copy(alpha = getA(3))) }
-                            paths["p1_dot"]?.let { drawPath(it, color.copy(alpha = getA(4))) }
+                            paths["p1_cam"]?.let { drawGlyphPath(it, getA(0)) }
+                            paths["p1_slash"]?.let { drawGlyphPath(it, getA(1)) }
+                            paths["p1s_ring"]?.let { drawGlyphPath(it, getA(2)) }
+                            paths["p1_battery"]?.let { drawGlyphPath(it, getA(3)) }
+                            paths["p1_dot"]?.let { drawGlyphPath(it, getA(4)) }
                         } else {
-                            paths["p1_cam"]?.let { drawPath(it, color.copy(alpha = getA(0))) }
-                            paths["p1_slash"]?.let { drawPath(it, color.copy(alpha = getA(1))) }
-                            paths["p1_ring_bl"]?.let { drawPath(it, color.copy(alpha = getA(2))) }
-                            paths["p1_ring_br"]?.let { drawPath(it, color.copy(alpha = getA(3))) }
-                            paths["p1_ring_tr"]?.let { drawPath(it, color.copy(alpha = getA(4))) }
-                            paths["p1_ring_tl"]?.let { drawPath(it, color.copy(alpha = getA(5))) }
-                            paths["p1_dot"]?.let { drawPath(it, color.copy(alpha = getA(6))) }
+                            paths["p1_cam"]?.let { drawGlyphPath(it, getA(0)) }
+                            paths["p1_slash"]?.let { drawGlyphPath(it, getA(1)) }
+                            paths["p1_ring_bl"]?.let { drawGlyphPath(it, getA(2)) }
+                            paths["p1_ring_br"]?.let { drawGlyphPath(it, getA(3)) }
+                            paths["p1_ring_tr"]?.let { drawGlyphPath(it, getA(4)) }
+                            paths["p1_ring_tl"]?.let { drawGlyphPath(it, getA(5)) }
+                            paths["p1_dot"]?.let { drawGlyphPath(it, getA(6)) }
                             paths["p1_battery"]?.let {
-                                drawPathVerticalSegments(this, it, color, 7..14, renderState, baseOpacity)
+                                drawPathVerticalSegments(this, it, color, 7..14, renderState, baseOpacity, scale)
                             }
                         }
                     }
                     DeviceProfile.DEVICE_NP2 -> {
-                        paths["p2_0"]?.let { drawPath(it, color.copy(alpha = getA(0))) }
-                        paths["p2_1"]?.let { drawPath(it, color.copy(alpha = getA(1))) }
-                        paths["p2_2"]?.let { drawPath(it, color.copy(alpha = getA(2))) }
+                        paths["p2_0"]?.let { drawGlyphPath(it, getA(0)) }
+                        paths["p2_1"]?.let { drawGlyphPath(it, getA(1)) }
+                        paths["p2_2"]?.let { drawGlyphPath(it, getA(2)) }
                         paths["p2_ring"]?.let {
-                            drawPathRingSegments(this, it, color, (3..18).toList(), renderState, baseOpacity)
+                            drawPathRingSegments(this, it, color, (3..18).toList(), renderState, baseOpacity, scale)
                         }
                         for (i in 19..24) {
-                            paths["p2_$i"]?.let { drawPath(it, color.copy(alpha = getA(i))) }
+                            paths["p2_$i"]?.let { drawGlyphPath(it, getA(i)) }
                         }
                         paths["p2_battery"]?.let {
-                            drawPathVerticalSegments(this, it, color, 25..32, renderState, baseOpacity)
+                            drawPathVerticalSegments(this, it, color, 25..32, renderState, baseOpacity, scale)
                         }
                     }
                     DeviceProfile.DEVICE_NP2A -> {
@@ -141,10 +208,10 @@ fun GlyphPreview(
                             scale(1.128745f, 1.128745f, pivot = Offset.Zero)
                         }) {
                             paths["p2a_large"]?.let {
-                                drawPathAddressable(this, it, color, (0..23).toList(), renderState, baseOpacity)
+                                drawPathAddressable(this, it, color, (0..23).toList(), renderState, baseOpacity, scale)
                             }
-                            paths["p2a_medium"]?.let { drawPath(it, color.copy(alpha = getA(24))) }
-                            paths["p2a_small"]?.let { drawPath(it, color.copy(alpha = getA(25))) }
+                            paths["p2a_medium"]?.let { drawGlyphPath(it, getA(24)) }
+                            paths["p2a_small"]?.let { drawGlyphPath(it, getA(25)) }
                         }
                     }
                     DeviceProfile.DEVICE_NP3A -> {
@@ -153,22 +220,22 @@ fun GlyphPreview(
                             scale(1.03f, 1.03f, pivot = Offset.Zero)
                         }) {
                             paths["p3a_large"]?.let {
-                                drawPathAddressable(this, it, color, (0..19).toList(), renderState, baseOpacity)
+                                drawPathAddressable(this, it, color, (0..19).toList(), renderState, baseOpacity, scale)
                             }
                             paths["p3a_medium"]?.let {
-                                drawPathAddressable(this, it, color, (20..30).toList(), renderState, baseOpacity)
+                                drawPathAddressable(this, it, color, (20..30).toList(), renderState, baseOpacity, scale)
                             }
                             paths["p3a_small"]?.let {
-                                drawPathAddressable(this, it, color, (31..35).toList(), renderState, baseOpacity, vertical = false)
+                                drawPathAddressable(this, it, color, (31..35).toList(), renderState, baseOpacity, scale, vertical = false)
                             }
                         }
                     }
                     DeviceProfile.DEVICE_NP4A -> {
                         paths["p4a_bar"]?.let {
-                            drawPathAddressable(this, it, color, (0..5).toList(), renderState, baseOpacity, vertical = false)
+                            drawPathAddressable(this, it, color, (0..5).toList(), renderState, baseOpacity, scale, vertical = false)
                         }
                         paths["p4a_dot"]?.let {
-                            drawPath(it, Color.Red.copy(alpha = getA(6)))
+                            drawGlyphPath(it, getA(6))
                         }
                     }
 
@@ -192,7 +259,7 @@ fun GlyphPreview(
                                         11.6f + col * (pixelSize + pixelGap),
                                         11.6f + row * (pixelSize + pixelGap)
                                     ),
-                                    size = androidx.compose.ui.geometry.Size(pixelSize, pixelSize),
+                                    size = Size(pixelSize, pixelSize),
                                     alpha = a
                                 )
                             }
@@ -215,7 +282,7 @@ fun GlyphPreview(
                                 drawRect(
                                     color = color,
                                     topLeft = Offset(11.6f + col * (pixelSize + pixelGap), 11.6f + row * (pixelSize + pixelGap)),
-                                    size = androidx.compose.ui.geometry.Size(pixelSize, pixelSize),
+                                    size = Size(pixelSize, pixelSize),
                                     alpha = a
                                 )
                             }
@@ -234,6 +301,7 @@ private fun drawPathAddressable(
     indices: List<Int>,
     state: FloatArray,
     baseOpacity: Float,
+    scale: Float,
     vertical: Boolean = true
 ) {
     val b = path.getBounds()
@@ -248,12 +316,23 @@ private fun drawPathAddressable(
             right = if (vertical) 1000f else b.left + (i + 1) * step,
             bottom = if (vertical) b.top + (i + 1) * step else 1000f
         ) {
-            scope.drawPath(path, color.copy(alpha = alpha))
+            if (alpha > baseOpacity + 0.05f) {
+                scope.drawIntoCanvas { canvas ->
+                    val paint = Paint().asFrameworkPaint().apply {
+                        this.color = android.graphics.Color.WHITE
+                        setShadowLayer(15f * scale, 0f, 0f, android.graphics.Color.WHITE)
+                        this.alpha = (alpha * 255).toInt()
+                    }
+                    canvas.nativeCanvas.drawPath(path.asAndroidPath(), paint)
+                }
+            } else {
+                scope.drawPath(path, color.copy(alpha = alpha))
+            }
         }
     }
 }
 
-private fun drawPathRingSegments(scope: DrawScope, path: Path, color: Color, indices: List<Int>, state: FloatArray, baseOpacity: Float) {
+private fun drawPathRingSegments(scope: DrawScope, path: Path, color: Color, indices: List<Int>, state: FloatArray, baseOpacity: Float, scale: Float) {
     val b = path.getBounds()
     val count = indices.size
     val centerX = b.left + b.width/2
@@ -268,11 +347,22 @@ private fun drawPathRingSegments(scope: DrawScope, path: Path, color: Color, ind
             right = if (isR) 1000f else centerX,
             bottom = b.top + (row + 1) * sliceH
         ) {
-            scope.drawPath(path, color.copy(alpha = alpha))
+            if (alpha > baseOpacity + 0.05f) {
+                scope.drawIntoCanvas { canvas ->
+                    val paint = Paint().asFrameworkPaint().apply {
+                        this.color = android.graphics.Color.WHITE
+                        setShadowLayer(15f * scale, 0f, 0f, android.graphics.Color.WHITE)
+                        this.alpha = (alpha * 255).toInt()
+                    }
+                    canvas.nativeCanvas.drawPath(path.asAndroidPath(), paint)
+                }
+            } else {
+                scope.drawPath(path, color.copy(alpha = alpha))
+            }
         }
     }
 }
-private fun drawPathVerticalSegments(scope: DrawScope, path: Path, color: Color, range: IntRange, state: FloatArray, baseOpacity: Float) {
+private fun drawPathVerticalSegments(scope: DrawScope, path: Path, color: Color, range: IntRange, state: FloatArray, baseOpacity: Float, scale: Float) {
     val b = path.getBounds()
     val count = range.last - range.first + 1
     val sliceH = b.height / count
@@ -285,7 +375,18 @@ private fun drawPathVerticalSegments(scope: DrawScope, path: Path, color: Color,
             right = 1000f,
             bottom = b.bottom - i * sliceH
         ) {
-            scope.drawPath(path, color.copy(alpha = alpha))
+            if (alpha > baseOpacity + 0.05f) {
+                scope.drawIntoCanvas { canvas ->
+                    val paint = Paint().asFrameworkPaint().apply {
+                        this.color = android.graphics.Color.WHITE
+                        setShadowLayer(15f * scale, 0f, 0f, android.graphics.Color.WHITE)
+                        this.alpha = (alpha * 255).toInt()
+                    }
+                    canvas.nativeCanvas.drawPath(path.asAndroidPath(), paint)
+                }
+            } else {
+                scope.drawPath(path, color.copy(alpha = alpha))
+            }
         }
     }
 }
