@@ -3,7 +3,7 @@
     <string name="app_name">Better Nothing Müzik Görselleştirici</string>
 
     <!-- Audio Screen -->
-    <string name="audio_screen_title">Better Nothing\\nMüzik Görselleştirici</string>
+    <string name="audio_screen_title">Better Nothing\nMüzik Görselleştirici</string>
     <string name="audio_description_running">Gerçek zamanlı ses görselleştirici aktif. Telefonunuz artık ritme göre dans ediyor! Hiçbir içerik kaydedilmez ve gizliliğinize saygı duyulur.</string>
     <string name="audio_description_idle">Bu uygulama Aleks Levet, rKyzen ve Oliver lebaigue tarafından yapılmıştır.\nGlyph Arayüzünü müziğinizle senkronize etmek için bu uygulama cihaz sesini yakalar. Yüksek kaliteli görselleştirme için Medya Yansıtma (Media Projection) kullanıyoruz.\n\nGizlilik Notu: Sadece ses akışını kullanıyoruz. Hiçbir ekran içeriği kaydedilmez.</string>
     <string name="auto_memorize_device">Cihazı Otomatik Hatırla</string>

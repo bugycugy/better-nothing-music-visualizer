@@ -121,14 +121,15 @@ fun AudioScreen(
 
         AnimatedVisibility(visible = isRunning) {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+
+                BodyText(
+                    text = stringResource(R.string.latency_compensation_description)
+                )
+
                 AutoDeviceCard(
                     enabled = autoDeviceEnabled,
                     onToggle = handleAutoToggle,
                     deviceName = connectedDeviceName
-                )
-
-                BodyText(
-                    text = stringResource(R.string.latency_compensation_description)
                 )
 
                 LatencyCard(
