@@ -38,7 +38,7 @@ public final class ContinuousHapticEngine {
 
     // Mapping / shaping
     private static final float DEFAULT_DECAY = 0.85f;
-    private static final float DEFAULT_GAMMA = 1.0f;
+    private static final float DEFAULT_GAMMA = 2.0f;
     private static final float EPSILON = 0.0001f;
     private static final float PEAK_FALLOFF = 0.9995f;
     private static final float SPECTRUM_GAIN = 4.0f;
@@ -120,30 +120,33 @@ public final class ContinuousHapticEngine {
         // Normalize to recent peaks
         float normalized = decayedState / peakTracker;
 
-        // Apply User Gamma and Multiplier
-        float shaped = (float) Math.pow(normalized, hapticGamma) * hapticMultiplier;
+        // LED Logic: Quadratic shaping first
+        float ledShaped = normalized * normalized;
+
+        // Then apply User Gamma and Multiplier
+        float userShaped = (float) Math.pow(ledShaped, hapticGamma) * hapticMultiplier;
         
-        int amplitude = Math.round(clamp01(shaped) * MAX_AMPLITUDE);
+        int finalAmplitude = Math.round(clamp01(userShaped) * MAX_AMPLITUDE);
 
-        if (amplitude > 0) {
-            amplitude = Math.max(MIN_ACTIVE_AMPLITUDE, amplitude);
+        if (finalAmplitude > 0) {
+            finalAmplitude = Math.max(MIN_ACTIVE_AMPLITUDE, finalAmplitude);
         }
-        amplitude = clampInt(amplitude, 0, MAX_AMPLITUDE);
+        finalAmplitude = clampInt(finalAmplitude, 0, MAX_AMPLITUDE);
 
-        if (amplitude <= 0) {
+        if (finalAmplitude <= 0) {
             stopHapticsInternal();
             return;
         }
 
         final long now = SystemClock.elapsedRealtime();
-        if (waveformActive && amplitude == lastAmplitude) {
+        if (waveformActive && finalAmplitude == lastAmplitude) {
             return;
         }
         if (waveformActive && (now - lastSubmitMs) < MIN_RESUBMIT_INTERVAL_MS) {
             return;
         }
 
-        submitContinuousWaveform(amplitude);
+        submitContinuousWaveform(finalAmplitude);
     }
 
     public synchronized void stopHaptics() {
