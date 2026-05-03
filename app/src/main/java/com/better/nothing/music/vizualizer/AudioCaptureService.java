@@ -224,12 +224,23 @@ public class AudioCaptureService extends Service {
         }
     };
 
-    private record ZoneSpec(float lowHz, float highHz, float lowPercent, float highPercent) {
+    private static final class ZoneSpec {
+        final float lowHz;
+        final float highHz;
+        final float lowPercent;
+        final float highPercent;
+
+        ZoneSpec(float lowHz, float highHz, float lowPercent, float highPercent) {
+            this.lowHz = lowHz;
+            this.highHz = highHz;
+            this.lowPercent = lowPercent;
+            this.highPercent = highPercent;
+        }
 
         boolean hasPercentSlice() {
-                return !Float.isNaN(lowPercent) && !Float.isNaN(highPercent);
-            }
+            return !Float.isNaN(lowPercent) && !Float.isNaN(highPercent);
         }
+    }
 
     private static final class FrequencyRange {
         final float lowHz;
@@ -245,13 +256,45 @@ public class AudioCaptureService extends Service {
         }
     }
 
-    private record VisualizerConfig(String presetKey, String description, float decay,
-                                    ZoneSpec[] zones, FrequencyRange[] uniqueRanges,
-                                    int[][] zoneToRangeIndices) {
+    private static final class VisualizerConfig {
+        final String presetKey;
+        final String description;
+        final float decay;
+        final ZoneSpec[] zones;
+        final FrequencyRange[] uniqueRanges;
+        final int[][] zoneToRangeIndices;
+
+        VisualizerConfig(
+                String presetKey,
+                String description,
+                float decay,
+                ZoneSpec[] zones,
+                FrequencyRange[] uniqueRanges,
+                int[][] zoneToRangeIndices
+        ) {
+            this.presetKey = presetKey;
+            this.description = description;
+            this.decay = decay;
+            this.zones = zones;
+            this.uniqueRanges = uniqueRanges;
+            this.zoneToRangeIndices = zoneToRangeIndices;
+        }
     }
 
-    private record PendingFrame(float[] uniquePeaks, float hapticPeak, VisualizerConfig config,
-                                int configVersion, long dueAtMs) {
+    private static final class PendingFrame {
+        final float[] uniquePeaks;
+        final float hapticPeak;
+        final VisualizerConfig config;
+        final int configVersion;
+        final long dueAtMs;
+
+        PendingFrame(float[] uniquePeaks, float hapticPeak, VisualizerConfig config, int configVersion, long dueAtMs) {
+            this.uniquePeaks = uniquePeaks;
+            this.hapticPeak = hapticPeak;
+            this.config = config;
+            this.configVersion = configVersion;
+            this.dueAtMs = dueAtMs;
+        }
     }
 
     public static final class PresetInfo {
@@ -1117,6 +1160,7 @@ public class AudioCaptureService extends Service {
         return changed;
     }
 
+
     private boolean shouldRefreshHapticWaveform(long now) {
         long durationMs = getHapticWaveformDurationMs();
         if (durationMs <= 0L) {
@@ -1851,6 +1895,13 @@ public class AudioCaptureService extends Service {
         return new AudioRouteInfo(routeKey, routeName);
     }
 
-    private record AudioRouteInfo(String storageKey, String displayName) {
+    private static final class AudioRouteInfo {
+        final String storageKey;
+        final String displayName;
+
+        AudioRouteInfo(String storageKey, String displayName) {
+            this.storageKey = storageKey;
+            this.displayName = displayName;
+        }
     }
 }
