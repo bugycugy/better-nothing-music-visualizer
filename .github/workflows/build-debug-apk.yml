@@ -22,7 +22,7 @@ jobs:
         if [ ! -f "gradlew" ]; then
           echo "Gradle wrapper missing, generating..."
           wget https://services.gradle.org/distributions/gradle-9.4.1-bin.zip
-          unzip -q gradle-9.4.1-bin.zip
+          unzip -q gradle-9.4.1/bin.zip
           ./gradle-9.4.1/bin/gradle wrapper --gradle-version 9.4.1
         else
           echo "Gradle wrapper already exists"
@@ -37,8 +37,19 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
+    # IMPROVEMENT: Cache Gradle dependencies to speed up future builds
+    - name: Cache Gradle packages
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
     - name: Build Debug APK
-      run: ./gradlew assembleDebug
+      run: ./gradlew assembleDebug --stacktrace
 
     - name: Prepare beta builds folder
       run: |
@@ -52,8 +63,8 @@ jobs:
 
     - name: Commit APK
       run: |
-        git config user.name "github-actions"
-        git config user.email "github-actions@github.com"
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
         git add beta-builds/app-debug.apk
-        git commit -m "create beta build APK" || echo "No changes to commit"
+        git commit -m "chore: create beta build APK [skip ci]" || echo "No changes to commit"
         git push
