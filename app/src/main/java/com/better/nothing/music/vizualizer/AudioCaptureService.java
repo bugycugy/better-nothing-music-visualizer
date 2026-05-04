@@ -184,6 +184,23 @@ public class AudioCaptureService extends Service {
     private GlyphRenderer mGlyphRenderer;
     private AudioDeviceManager mAudioDeviceManager;
     private long mLastSendMs = 0L;
+    private long mLastAudioActivityMs = 0L;
+    private final Handler mMainHandler = new Handler(android.os.Looper.getMainLooper());
+    private final Runnable mIdlePulseRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (mIdleBreathingEnabled && mSessionOpen && mVisualizerConfig != null) {
+                long now = SystemClock.elapsedRealtime();
+                // If it's been more than 100ms since the last audio frame, manually trigger a frame for breathing
+                if (now - mLastAudioActivityMs > 100) {
+                    processFrame(new float[0], 0f, mVisualizerConfig, mPresetConfigVersion);
+                }
+            }
+            if (sIsRunning) {
+                mMainHandler.postDelayed(this, 33); // ~30fps for idle breathing
+            }
+        }
+    };
 
     private final AudioDeviceCallback mAudioDeviceCallback = new AudioDeviceCallback() {
         @Override
@@ -243,16 +260,19 @@ public class AudioCaptureService extends Service {
 
         mHapticEngine = new ContinuousHapticEngine(this);
         mAudioProcessor = new AudioProcessor();
-        mGlyphRenderer = new GlyphRenderer(mGamma, mIdleBreathingEnabled, mNotificationFlashEnabled);
         mAudioDeviceManager = new AudioDeviceManager(this, this::refreshLatencyForCurrentAudioRoute);
 
         mSelectedDevice = DeviceProfile.detectDevice();
+        mGlyphRenderer = new GlyphRenderer(mGamma, mIdleBreathingEnabled, mNotificationFlashEnabled, mSelectedDevice);
         mLatencyCompensationMs = loadLatencyCompensationMs(this, mSelectedDevice);
         mGamma = loadGamma(this);
 
         SharedPreferences appPrefs = getSharedPreferences(APP_PREFS_NAME, MODE_PRIVATE);
         mIdleBreathingEnabled = appPrefs.getBoolean("idle_breathing_enabled", false);
         mNotificationFlashEnabled = appPrefs.getBoolean("notification_flash_enabled", false);
+        
+        String idlePattern = appPrefs.getString("idle_pattern", "pulse");
+        mGlyphRenderer.setIdlePattern(idlePattern);
 
         refreshLatencyForCurrentAudioRoute();
 
@@ -270,6 +290,8 @@ public class AudioCaptureService extends Service {
 
         mGM = GlyphManager.getInstance(getApplicationContext());
         mGM.init(mGlyphCallback);
+
+        mMainHandler.post(mIdlePulseRunnable);
     }
 
     @Override
@@ -455,6 +477,9 @@ public class AudioCaptureService extends Service {
 
     public void setDevice(int device) {
         mSelectedDevice = device;
+        if (mGlyphRenderer != null) {
+            mGlyphRenderer.setDeviceType(device);
+        }
         setLatencyCompensationMs(loadLatencyCompensationMs(this, device));
         try {
             refreshPresetCatalog();
@@ -484,6 +509,12 @@ public class AudioCaptureService extends Service {
     public void setIdleBreathingEnabled(boolean enabled) {
         mIdleBreathingEnabled = enabled;
         mGlyphRenderer.setIdleBreathingEnabled(enabled);
+    }
+
+    public void setIdlePattern(String pattern) {
+        if (mGlyphRenderer != null) {
+            mGlyphRenderer.setIdlePattern(pattern);
+        }
     }
 
     public void setNotificationFlashEnabled(boolean enabled) {
@@ -764,6 +795,10 @@ public class AudioCaptureService extends Service {
         // Check for notification flash
         if (now - mLastNotificationFlashMs < FLASH_DURATION_MS) {
             mGlyphRenderer.triggerNotificationFlash(now);
+        }
+
+        if (uniquePeaks.length > 0) {
+            mLastAudioActivityMs = now;
         }
 
         int[] frameColors = mGlyphRenderer.processFrame(uniquePeaks, config, now);

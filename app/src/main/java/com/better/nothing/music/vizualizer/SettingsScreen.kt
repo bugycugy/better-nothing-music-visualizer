@@ -64,6 +64,8 @@ internal fun SettingsScreen(
     viewModel: MainViewModel,
     idleBreathingEnabled: Boolean,
     onIdleBreathingEnabledChanged: (Boolean) -> Unit,
+    idlePattern: String,
+    onIdlePatternChanged: (String) -> Unit,
     notificationFlashEnabled: Boolean,
     onNotificationFlashEnabledChanged: (Boolean) -> Unit,
 ) {
@@ -144,6 +146,58 @@ internal fun SettingsScreen(
                         checked = idleBreathingEnabled,
                         onCheckedChange = onIdleBreathingEnabledChanged
                     )
+
+                    if (idleBreathingEnabled) {
+                        var patternExpanded by remember { mutableStateOf(false) }
+                        val patternNames = mapOf(
+                            "pulse" to "Breathing Pulse",
+                            "wave" to "Traveling Wave",
+                            "scanner" to "Cylon Scanner",
+                            "static" to "Low Static"
+                        )
+
+                        Column(modifier = Modifier.padding(top = 8.dp)) {
+                            Text(
+                                text = "Idle Pattern",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                            
+                            Box {
+                                OutlinedTextField(
+                                    value = patternNames[idlePattern] ?: idlePattern,
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = patternExpanded) },
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .matchParentSize()
+                                        .background(Color.Transparent)
+                                        .clickable { patternExpanded = true }
+                                )
+                                
+                                DropdownMenu(
+                                    expanded = patternExpanded,
+                                    onDismissRequest = { patternExpanded = false },
+                                    modifier = Modifier.fillMaxWidth(0.9f)
+                                ) {
+                                    patternNames.forEach { (key, name) ->
+                                        DropdownMenuItem(
+                                            text = { Text(name) },
+                                            onClick = {
+                                                onIdlePatternChanged(key)
+                                                patternExpanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                     
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
 

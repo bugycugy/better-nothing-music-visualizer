@@ -18,6 +18,8 @@ public class GlyphRenderer {
     private float mGamma;
     private boolean mIdleBreathingEnabled;
     private final boolean mNotificationFlashEnabled;
+    private int mDeviceType = DeviceProfile.DEVICE_UNKNOWN;
+    private String mIdlePattern = "pulse";
 
     private float[] mCurrentLightState = new float[0];
     private float[] mZonePeaks = new float[0];
@@ -26,11 +28,14 @@ public class GlyphRenderer {
     private long mLastSendMs = 0L;
     private long mSilenceStartTimeMs = 0;
     private long mLastNotificationFlashMs = 0;
+    private long mLastFrameMs = 0;
+    private float mBreathingEnvelope = 0f;
 
-    public GlyphRenderer(float gamma, boolean idleBreathingEnabled, boolean notificationFlashEnabled) {
+    public GlyphRenderer(float gamma, boolean idleBreathingEnabled, boolean notificationFlashEnabled, int deviceType) {
         this.mGamma = gamma;
         this.mIdleBreathingEnabled = idleBreathingEnabled;
         this.mNotificationFlashEnabled = notificationFlashEnabled;
+        this.mDeviceType = deviceType;
     }
 
     public void setIdleBreathingEnabled(boolean enabled) {
@@ -40,9 +45,18 @@ public class GlyphRenderer {
         }
     }
 
+    public void setIdlePattern(String pattern) {
+        this.mIdlePattern = pattern;
+    }
+
     public void setGamma(float gamma) {
         mGamma = gamma;
         mLastHash = Integer.MIN_VALUE; // Force redraw with new gamma
+    }
+
+    public void setDeviceType(int deviceType) {
+        this.mDeviceType = deviceType;
+        mLastHash = Integer.MIN_VALUE;
     }
 
     public void resetState(AudioProcessor.VisualizerConfig config) {
@@ -59,26 +73,31 @@ public class GlyphRenderer {
         mLastHash = Integer.MIN_VALUE;
         mLastSendMs = 0L;
         mSilenceStartTimeMs = 0;
+        mLastFrameMs = 0;
+        mBreathingEnvelope = 0f;
     }
 
     public int[] processFrame(float[] uniquePeaks, AudioProcessor.VisualizerConfig config, long nowMs) {
-        if (config == null || config.zones.length == 0) {
+        if (config == null) {
             return new int[0];
         }
 
-        ensureStateArrays(config.zones.length, config.uniqueRanges.length);
+        int hardwareCount = DeviceProfile.getLedCount(mDeviceType);
+        int zoneCount = Math.max(config.zones.length, hardwareCount);
 
-        float[] nextLightState = computeNextLightState(uniquePeaks, config);
+        ensureStateArrays(zoneCount, config.uniqueRanges.length);
+
+        float[] nextLightState = computeNextLightState(uniquePeaks, config, zoneCount);
 
         if (nowMs - mLastNotificationFlashMs < FLASH_DURATION_MS) {
             Arrays.fill(nextLightState, 1.0f);
-        } else if (mIdleBreathingEnabled) {
+        } else {
             applyIdleBreathing(nextLightState, uniquePeaks, nowMs);
         }
 
         System.arraycopy(nextLightState, 0, mCurrentLightState, 0, nextLightState.length);
 
-        int[] frameColors = buildFrameColors(nextLightState, config.zones.length);
+        int[] frameColors = buildFrameColors(nextLightState, zoneCount);
         int frameHash = Arrays.hashCode(frameColors);
         if (frameHash == mLastHash) {
             return null; // No change
@@ -99,28 +118,28 @@ public class GlyphRenderer {
         return mCurrentLightState != null ? Arrays.copyOf(mCurrentLightState, mCurrentLightState.length) : new float[0];
     }
 
-    private float[] computeNextLightState(float[] uniquePeaks, AudioProcessor.VisualizerConfig config) {
+    private float[] computeNextLightState(float[] uniquePeaks, AudioProcessor.VisualizerConfig config, int totalCount) {
         float[] decayedFrequencyState = computeDecayedFrequencyState(uniquePeaks, config);
-        float[] nextState = new float[config.zones.length];
+        float[] nextState = new float[totalCount];
 
-        for (int zoneIndex = 0; zoneIndex < config.zones.length; zoneIndex++) {
+        for (int i = 0; i < config.zones.length; i++) {
             float rawZonePeak = 0f;
-            int[] overlappingRanges = config.zoneToRangeIndices[zoneIndex];
+            int[] overlappingRanges = config.zoneToRangeIndices[i];
             for (int rangeIndex : overlappingRanges) {
                 if (rangeIndex >= 0 && rangeIndex < decayedFrequencyState.length) {
                     rawZonePeak = Math.max(rawZonePeak, decayedFrequencyState[rangeIndex]);
                 }
             }
 
-            mZonePeaks[zoneIndex] = Math.max(rawZonePeak, mZonePeaks[zoneIndex] * PEAK_FALLOFF);
-            if (mZonePeaks[zoneIndex] < EPSILON) {
-                mZonePeaks[zoneIndex] = EPSILON;
+            mZonePeaks[i] = Math.max(rawZonePeak, mZonePeaks[i] * PEAK_FALLOFF);
+            if (mZonePeaks[i] < EPSILON) {
+                mZonePeaks[i] = EPSILON;
             }
 
-            float normalized = rawZonePeak / mZonePeaks[zoneIndex];
+            float normalized = rawZonePeak / mZonePeaks[i];
             float shaped = normalized * normalized;
-            float mapped = applyPercentSlice(shaped, config.zones[zoneIndex]);
-            nextState[zoneIndex] = mapped < EPSILON ? 0f : mapped;
+            float mapped = applyPercentSlice(shaped, config.zones[i]);
+            nextState[i] = mapped < EPSILON ? 0f : mapped;
         }
 
         return nextState;
@@ -139,6 +158,9 @@ public class GlyphRenderer {
     }
 
     private void applyIdleBreathing(float[] nextState, float[] uniquePeaks, long nowMs) {
+        long deltaMs = (mLastFrameMs > 0) ? (nowMs - mLastFrameMs) : 16;
+        mLastFrameMs = nowMs;
+
         boolean isSilent = true;
         for (float peak : uniquePeaks) {
             if (peak * SPECTRUM_GAIN > SILENCE_THRESHOLD) {
@@ -151,19 +173,62 @@ public class GlyphRenderer {
             if (mSilenceStartTimeMs == 0) {
                 mSilenceStartTimeMs = nowMs;
             }
-
-            long silenceDuration = nowMs - mSilenceStartTimeMs;
-            if (silenceDuration > BREATH_DELAY_MS) {
-                float progress = ((float)((silenceDuration - BREATH_DELAY_MS) % BREATH_PERIOD_MS)) / BREATH_PERIOD_MS;
-                float breathIntensity = (float) (0.5f * (1.0f + Math.sin(2.0 * Math.PI * progress - Math.PI / 2.0)));
-                float subtleBreath = breathIntensity * 0.15f;
-
-                for (int i = 0; i < nextState.length; i++) {
-                    nextState[i] = Math.max(nextState[i], subtleBreath);
-                }
-            }
         } else {
             mSilenceStartTimeMs = 0;
+        }
+
+        long silenceDuration = (mSilenceStartTimeMs > 0) ? (nowMs - mSilenceStartTimeMs) : 0;
+        boolean shouldBreathe = mIdleBreathingEnabled && (silenceDuration > BREATH_DELAY_MS);
+        float targetEnvelope = shouldBreathe ? 1.0f : 0.0f;
+
+        // Smooth envelope transition
+        if (mBreathingEnvelope < targetEnvelope) {
+            // Fade in slowly (~1.5s)
+            mBreathingEnvelope += (float) deltaMs / 1500f;
+            if (mBreathingEnvelope > targetEnvelope) mBreathingEnvelope = targetEnvelope;
+        } else if (mBreathingEnvelope > targetEnvelope) {
+            // Fade out faster (~300ms) for responsiveness
+            mBreathingEnvelope -= (float) deltaMs / 300f;
+            if (mBreathingEnvelope < targetEnvelope) mBreathingEnvelope = targetEnvelope;
+        }
+
+        if (mBreathingEnvelope > 0.01f) {
+            int zoneCount = nextState.length;
+            for (int i = 0; i < zoneCount; i++) {
+                float intensity = 0f;
+                switch (mIdlePattern) {
+                    case "wave": {
+                        double timeProg = (double) (nowMs % 2000L) / 2000L;
+                        float phaseShift = (float) i / Math.max(1, zoneCount);
+                        intensity = (float) (0.5 + 0.5 * Math.sin(2.0 * Math.PI * (timeProg - phaseShift)));
+                        break;
+                    }
+                    case "scanner": {
+                        double timeProg = (double) (nowMs % 2500L) / 2500L;
+                        float scannerPos = (float) (0.5 + 0.5 * Math.sin(2.0 * Math.PI * timeProg));
+                        float ledPos = (float) i / Math.max(1, zoneCount);
+                        float dist = Math.abs(ledPos - scannerPos);
+                        intensity = (float) Math.exp(-dist * dist * 40.0);
+                        break;
+                    }
+                    case "static": {
+                        intensity = 0.4f;
+                        break;
+                    }
+                    case "pulse":
+                    default: {
+                        double timeProg = (double) (nowMs % 3000L) / 3000L;
+                        float phaseShift = (float) i * 0.02f;
+                        intensity = (float) (0.5 + 0.5 * Math.sin(2.0 * Math.PI * (timeProg + phaseShift) - Math.PI / 2.0));
+                        break;
+                    }
+                }
+
+                float breathVal = (0.02f + intensity * 0.48f) * mBreathingEnvelope;
+                if (nextState[i] < breathVal) {
+                    nextState[i] = breathVal;
+                }
+            }
         }
     }
 

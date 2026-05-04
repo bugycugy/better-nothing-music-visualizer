@@ -15,29 +15,7 @@
 //////
 ////
 //
-
-///////////////////////////////////////////////////////////
-CHANGELOG HERE PLEASE: 2.7 TO 2.8:
-
-2.8 changes:
-- Removed legacy hardcoded preset fallback logic and old vocal/bass leftovers from the active runtime path.
-- Refactored AudioCaptureService so capture and preset processing are driven by zones.config without duplicated setup code.
-- Improved foreground/background service behavior, including cleaner lifecycle handling and quick settings tile refreshes.
-- Added live audio route monitoring with AudioDeviceCallback for proper Bluetooth, wired, and speaker hot swapping.
-- Fixed auto device memorization so the selected output updates without needing an app restart.
-- Fixed latency persistence so each audio route/device can save and restore its own latency value automatically.
-- Added a new Haptics tab with a vibration icon and placeholder page.
-- Cleaned up old settings/resource leftovers and restored the adaptive launcher background color resource.
-- Added fine controls to the latency compensation setting
-- Fixed colors
-- Added NType font
-- More bouncy and snappy animations
-- Added more haptics at good places
-- Fixed "Check for Updates" crashing when updating zones.config (Thread handling fix).
-
-///////////////////////////////////////////////////////////
 */
-
 
 package com.better.nothing.music.vizualizer
 
@@ -242,6 +220,9 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
     private val _idleBreathingEnabled = MutableStateFlow(false)
     val idleBreathingEnabled = _idleBreathingEnabled.asStateFlow()
 
+    private val _idlePattern = MutableStateFlow("pulse")
+    val idlePattern = _idlePattern.asStateFlow()
+
     private val _notificationFlashEnabled = MutableStateFlow(false)
     val notificationFlashEnabled = _notificationFlashEnabled.asStateFlow()
 
@@ -414,6 +395,14 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         }
     }
 
+    fun setIdlePattern(pattern: String) {
+        _idlePattern.value = pattern
+        viewModelScope.launch(Dispatchers.IO) {
+            ctx.getSharedPreferences("viz_prefs", Context.MODE_PRIVATE)
+                .edit { putString("idle_pattern", pattern) }
+        }
+    }
+
     fun setNotificationFlashEnabled(enabled: Boolean) {
         _notificationFlashEnabled.value = enabled
         viewModelScope.launch(Dispatchers.IO) {
@@ -481,6 +470,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
                 _hapticsTabEnabled.value = prefs.getBoolean("haptics_tab_enabled", true)
 
                 _idleBreathingEnabled.value = prefs.getBoolean("idle_breathing_enabled", false)
+                _idlePattern.value = prefs.getString("idle_pattern", "pulse") ?: "pulse"
                 _notificationFlashEnabled.value = prefs.getBoolean("notification_flash_enabled", false)
 
                 val theme = prefs.getString("selected_theme", "OLED Black") ?: "OLED Black"
@@ -722,6 +712,7 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                 val hapticGamma by viewModel.hapticGamma.collectAsStateWithLifecycle()
 
                 val idleBreathingEnabled by viewModel.idleBreathingEnabled.collectAsStateWithLifecycle()
+                val idlePattern by viewModel.idlePattern.collectAsStateWithLifecycle()
                 val notificationFlashEnabled by viewModel.notificationFlashEnabled.collectAsStateWithLifecycle()
 
                 val selectedDevice by viewModel.selectedDevice.collectAsStateWithLifecycle()
@@ -767,6 +758,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
                     onHapticGammaChanged = ::onHapticGammaChanged,
                     idleBreathingEnabled = idleBreathingEnabled,
                     onIdleBreathingEnabledChanged = ::onIdleBreathingEnabledChanged,
+                    idlePattern = idlePattern,
+                    onIdlePatternChanged = ::onIdlePatternChanged,
                     notificationFlashEnabled = notificationFlashEnabled,
                     onNotificationFlashEnabledChanged = ::onNotificationFlashEnabledChanged,
                     selectedDevice = selectedDevice,
@@ -860,6 +853,11 @@ class MainActivity : ComponentActivity(), SensorEventListener {
     private fun onIdleBreathingEnabledChanged(enabled: Boolean) {
         viewModel.setIdleBreathingEnabled(enabled)
         service?.setIdleBreathingEnabled(enabled)
+    }
+
+    private fun onIdlePatternChanged(pattern: String) {
+        viewModel.setIdlePattern(pattern)
+        service?.setIdlePattern(pattern)
     }
 
     private fun onNotificationFlashEnabledChanged(enabled: Boolean) {
@@ -1200,6 +1198,8 @@ private fun BetterVizApp(
     onHapticGammaChanged: (Float) -> Unit,
     idleBreathingEnabled: Boolean,
     onIdleBreathingEnabledChanged: (Boolean) -> Unit,
+    idlePattern: String,
+    onIdlePatternChanged: (String) -> Unit,
     notificationFlashEnabled: Boolean,
     onNotificationFlashEnabledChanged: (Boolean) -> Unit,
     selectedDevice: Int,
@@ -1343,6 +1343,8 @@ private fun BetterVizApp(
                             viewModel = viewModel,
                             idleBreathingEnabled = idleBreathingEnabled,
                             onIdleBreathingEnabledChanged = onIdleBreathingEnabledChanged,
+                            idlePattern = idlePattern,
+                            onIdlePatternChanged = onIdlePatternChanged,
                             notificationFlashEnabled = notificationFlashEnabled,
                             onNotificationFlashEnabledChanged = onNotificationFlashEnabledChanged,
                         )
