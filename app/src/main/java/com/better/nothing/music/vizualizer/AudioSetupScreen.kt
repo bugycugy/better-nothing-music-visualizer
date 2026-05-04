@@ -203,6 +203,16 @@ fun LatencyCard(
             .map { it.first }
     }
 
+    // Play a tick when presets swap positions
+    var isFirstOrderChange by remember { mutableStateOf(true) }
+    LaunchedEffect(visualOrder) {
+        if (isFirstOrderChange) {
+            isFirstOrderChange = false
+            return@LaunchedEffect
+        }
+        haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+    }
+
     val activeIndex = if (draggingIndex != -1) draggingIndex else latencyPresets.indexOf(latencyMs)
 
     val updateLatency = { newValue: Int ->

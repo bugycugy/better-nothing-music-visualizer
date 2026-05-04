@@ -397,6 +397,19 @@ fun ExpressiveRangeSlider(
     val endDragged by endInteractionSource.collectIsDraggedAsState()
 
     val isAnyActive = startActive || startDragged || endActive || endDragged
+    val wasActive = remember { mutableStateOf(false) }
+
+    // Trigger haptic on Press/Release (skip initial state)
+    LaunchedEffect(isAnyActive) {
+        if (!wasActive.value && isAnyActive) {
+            // Trigger on press (transition from false to true)
+            haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+        } else if (wasActive.value && !isAnyActive) {
+            // Trigger on release (transition from true to false)
+            haptics.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+        }
+        wasActive.value = isAnyActive
+    }
 
     // Animation and Haptic logic remains the same...
     val animationFactor by animateFloatAsState(
@@ -408,9 +421,6 @@ fun ExpressiveRangeSlider(
     val startThumbFactor by animateFloatAsState(if (startActive || startDragged) 2.1f else 1.0f)
     val endThumbFactor by animateFloatAsState(if (endActive || endDragged) 2.1f else 1.0f)
 
-    LaunchedEffect(isAnyActive) {
-        if (isAnyActive) haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
-    }
     val view = LocalView.current
     RangeSlider(
         value = value,

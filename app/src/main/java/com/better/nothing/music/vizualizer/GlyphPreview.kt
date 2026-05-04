@@ -17,9 +17,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.vector.PathParser
@@ -79,7 +79,6 @@ fun GlyphPreviewContent(
 ) {
     val color = Color.White
     val baseOpacity = 0.10f
-    val renderState = vizState
 
     val parser = remember { PathParser() }
     val paths = remember {
@@ -142,7 +141,7 @@ fun GlyphPreviewContent(
             val dy = (size.height - viewBoxH * scale) / 2
 
             fun getA(idx: Int): Float {
-                val value = renderState.getOrElse(idx) { 0f }
+                val value = vizState.getOrElse(idx) { 0f }
                 return baseOpacity + (value * (1f - baseOpacity))
             }
 
@@ -166,11 +165,11 @@ fun GlyphPreviewContent(
                 when (device) {
                     DeviceProfile.DEVICE_NP1 -> {
                         if (renderState.size <= 5) {
-                            paths["p1_cam"]?.let { drawSmoothPath(it, getA(0)) }
-                            paths["p1_slash"]?.let { drawSmoothPath(it, getA(1)) }
-                            paths["p1s_ring"]?.let { drawSmoothPath(it, getA(2)) }
-                            paths["p1_battery"]?.let { drawSmoothPath(it, getA(3)) }
-                            paths["p1_dot"]?.let { drawSmoothPath(it, getA(4)) }
+                            paths["p1_cam"]?.let { drawGlyphPath(it, getA(0)) }
+                            paths["p1_slash"]?.let { drawGlyphPath(it, getA(1)) }
+                            paths["p1s_ring"]?.let { drawGlyphPath(it, getA(2)) }
+                            paths["p1_battery"]?.let { drawGlyphPath(it, getA(3)) }
+                            paths["p1_dot"]?.let { drawGlyphPath(it, getA(4)) }
                         } else {
                             paths["p1_cam"]?.let { drawSmoothPath(it, getA(0)) }
                             paths["p1_slash"]?.let { drawSmoothPath(it, getA(1)) }
@@ -180,7 +179,7 @@ fun GlyphPreviewContent(
                             paths["p1_ring_tl"]?.let { drawSmoothPath(it, getA(5)) }
                             paths["p1_dot"]?.let { drawSmoothPath(it, getA(6)) }
                             paths["p1_battery"]?.let {
-                                drawPathVerticalSegmentsSmooth(this, it, color, 7..14, renderState, baseOpacity, glowPaint)
+                                drawPathVerticalSegments(this, it, color, 7..14, renderState, baseOpacity, scale)
                             }
                         }
                     }
@@ -190,13 +189,13 @@ fun GlyphPreviewContent(
                         paths["p2_1"]?.let { drawSmoothPath(it, getA(1)) }
                         paths["p2_2"]?.let { drawSmoothPath(it, getA(2)) }
                         paths["p2_ring"]?.let {
-                            drawPathRingSegmentsSmooth(this, it, color, (3..18).toList(), renderState, baseOpacity, glowPaint)
+                            drawPathRingSegments(this, it, color, (3..18).toList(), renderState, baseOpacity, scale)
                         }
                         for (i in 19..24) {
                             paths["p2_$i"]?.let { drawSmoothPath(it, getA(i)) }
                         }
                         paths["p2_battery"]?.let {
-                            drawPathVerticalSegmentsSmooth(this, it, color, 25..32, renderState, baseOpacity, glowPaint)
+                            drawPathVerticalSegments(this, it, color, 25..32, renderState, baseOpacity, scale)
                         }
                     }
 
@@ -206,7 +205,7 @@ fun GlyphPreviewContent(
                             scale(1.128745f, 1.128745f, pivot = Offset.Zero)
                         }) {
                             paths["p2a_large"]?.let {
-                                drawPathAddressableSmooth(this, it, color, (0..23).toList(), renderState, baseOpacity, glowPaint)
+                                drawPathAddressable(this, it, color, (0..23).toList(), renderState, baseOpacity, scale)
                             }
                             paths["p2a_medium"]?.let { drawSmoothPath(it, getA(24)) }
                             paths["p2a_small"]?.let { drawSmoothPath(it, getA(25)) }
@@ -219,20 +218,20 @@ fun GlyphPreviewContent(
                             scale(1.03f, 1.03f, pivot = Offset.Zero)
                         }) {
                             paths["p3a_large"]?.let {
-                                drawPathAddressableSmooth(this, it, color, (0..19).toList(), renderState, baseOpacity, glowPaint)
+                                drawPathAddressable(this, it, color, (0..19).toList(), renderState, baseOpacity, scale)
                             }
                             paths["p3a_medium"]?.let {
-                                drawPathAddressableSmooth(this, it, color, (20..30).toList(), renderState, baseOpacity, glowPaint)
+                                drawPathAddressable(this, it, color, (20..30).toList(), renderState, baseOpacity, scale)
                             }
                             paths["p3a_small"]?.let {
-                                drawPathAddressableSmooth(this, it, color, (31..35).toList(), renderState, baseOpacity, glowPaint, vertical = false)
+                                drawPathAddressable(this, it, color, (31..35).toList(), renderState, baseOpacity, scale, vertical = false)
                             }
                         }
                     }
 
                     DeviceProfile.DEVICE_NP4A -> {
                         paths["p4a_bar"]?.let {
-                            drawPathAddressableSmooth(this, it, color, (0..5).toList(), renderState, baseOpacity, glowPaint, vertical = false)
+                            drawPathAddressable(this, it, color, (0..5).toList(), renderState, baseOpacity, scale, vertical = false)
                         }
                         paths["p4a_dot"]?.let {
                             drawSmoothPath(it, getA(6))
@@ -250,31 +249,47 @@ fun GlyphPreviewContent(
                             translate(matrixTranslateX, matrixTranslateY)
                             scale(matrixScale, matrixScale, pivot = Offset.Zero)
                         }) {
-                            val pixelSize = 4.0f
-                            val pixelGap = 1.1f
+                            val pixelSize = 4.25f
+                            val pixelGap = 0.86f
+                            val gridSize = 13
 
-                            drawIntoCanvas { canvas ->
-                                renderState.forEachIndexed { idx, value ->
-                                    if (idx >= matrixGridSize * matrixGridSize) return@forEachIndexed
+                            for (idx in renderState.indices) {
+                                if (idx >= gridSize * gridSize) break
+                                val a = getA(idx)
+                                val row = idx / gridSize
+                                val col = idx % gridSize
+                                drawRect(
+                                    color = color,
+                                    topLeft = Offset(
+                                        11.6f + col * (pixelSize + pixelGap),
+                                        11.6f + row * (pixelSize + pixelGap)
+                                    ),
+                                    size = Size(pixelSize, pixelSize),
+                                    alpha = a
+                                )
+                            }
+                        }
+                    }
 
-                                    val alpha = baseOpacity + (value * (1f - baseOpacity))
-                                    val row = idx / matrixGridSize
-                                    val col = idx % matrixGridSize
 
-                                    val cx = 11.6f + col * (pixelSize + pixelGap) + pixelSize / 2f
-                                    val cy = 11.6f + row * (pixelSize + pixelGap) + pixelSize / 2f
-
-                                    if (alpha > 0.15f) {
-                                        glowPaint.color = color
-                                        glowPaint.alpha = alpha * 0.35f
-                                        glowPaint.asFrameworkPaint().maskFilter = android.graphics.BlurMaskFilter(6f, android.graphics.BlurMaskFilter.Blur.NORMAL)
-                                        canvas.drawCircle(Offset(cx, cy), pixelSize * 1.2f, glowPaint)
-                                    }
-
-                                    glowPaint.alpha = alpha
-                                    glowPaint.asFrameworkPaint().maskFilter = null
-                                    canvas.drawCircle(Offset(cx, cy), pixelSize / 2f, glowPaint)
-                                }
+                    DeviceProfile.DEVICE_NP3 -> {
+                        withTransform({
+                            translate(-7f, -9f)
+                            scale(1.3f, 1.3f, pivot = Offset.Zero)
+                        }) {
+                            val pixelSize = 4.25f
+                            val pixelGap = 0.86f // inferred from SVG coords (e.g. 57.59 to 62.7 is 5.11)
+                            for (idx in renderState.indices) {
+                                val a = getA(idx)
+                                // Simplified layout: 25x25 grid
+                                val row = idx / 25
+                                val col = idx % 25
+                                drawRect(
+                                    color = color,
+                                    topLeft = Offset(11.6f + col * (pixelSize + pixelGap), 11.6f + row * (pixelSize + pixelGap)),
+                                    size = Size(pixelSize, pixelSize),
+                                    alpha = a
+                                )
                             }
                         }
                     }
@@ -293,7 +308,7 @@ private fun drawPathAddressableSmooth(
     indices: List<Int>,
     state: FloatArray,
     baseOpacity: Float,
-    paint: Paint,
+    scale: Float,
     vertical: Boolean = true
 ) {
     val b = path.getBounds()
@@ -332,15 +347,7 @@ private fun drawPathAddressableSmooth(
     }
 }
 
-private fun drawPathRingSegmentsSmooth(
-    scope: DrawScope,
-    path: Path,
-    color: Color,
-    indices: List<Int>,
-    state: FloatArray,
-    baseOpacity: Float,
-    paint: Paint
-) {
+private fun drawPathRingSegments(scope: DrawScope, path: Path, color: Color, indices: List<Int>, state: FloatArray, baseOpacity: Float, scale: Float) {
     val b = path.getBounds()
     val count = indices.size
     val centerX = b.left + b.width / 2
@@ -374,16 +381,7 @@ private fun drawPathRingSegmentsSmooth(
         }
     }
 }
-
-private fun drawPathVerticalSegmentsSmooth(
-    scope: DrawScope,
-    path: Path,
-    color: Color,
-    range: IntRange,
-    state: FloatArray,
-    baseOpacity: Float,
-    paint: Paint
-) {
+private fun drawPathVerticalSegments(scope: DrawScope, path: Path, color: Color, range: IntRange, state: FloatArray, baseOpacity: Float, scale: Float) {
     val b = path.getBounds()
     val count = range.last - range.first + 1
     val sliceH = b.height / count
