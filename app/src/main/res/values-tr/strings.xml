@@ -1,23 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Better Nothing Müzik Görselleştirici</string>
+    <string name="app_name">Better Nothing Müzik Görselleştiricic</string>
 
     <!-- Audio Screen -->
     <string name="audio_screen_title">Better Nothing\nMüzik Görselleştirici</string>
-    <string name="audio_description_running">Gerçek zamanlı ses görselleştirici aktif. Telefonunuz artık ritme göre dans ediyor! Hiçbir içerik kaydedilmez ve gizliliğinize saygı duyulur.</string>
-    <string name="audio_description_idle">Bu uygulama Aleks Levet, rKyzen ve Oliver lebaigue tarafından yapılmıştır.\nGlyph Arayüzünü müziğinizle senkronize etmek için bu uygulama cihaz sesini yakalar. Yüksek kaliteli görselleştirme için Medya Yansıtma (Media Projection) kullanıyoruz.\n\nGizlilik Notu: Sadece ses akışını kullanıyoruz. Hiçbir ekran içeriği kaydedilmez.</string>
+    <string name="audio_description_running">Gerçek zamanlı ses görselleştirici aktif. Telefonunuz şimdi ritme göre dans ediyor! Hiçbir içerik kaydedilmez ve gizliliğe saygı duyulur.</string>
+    <string name="audio_description_idle">Bu uygulama Aleks Levet, rKyzen ve Oliver Lebaigue tarafından yapılmıştır.\n\nGlyph Arayüzünü müziğinizle senkronize etmek için bu uygulama cihaz sesini yakalar. Yüksek kaliteli görselleştirme için Media Projection kullanıyoruz.\n\nGizlilik Notu: Yalnızca ses akışını kullanıyoruz. Ekran içeriği kaydedilmez.</string>
     <string name="auto_memorize_device">Cihazı Otomatik Hatırla</string>
-    <string name="saving_latency_for">Gecikme süresi kaydediliyor: %s</string>
+    <string name="saving_latency_for">Şunun için gecikme kaydediliyor: %s</string>
     <string name="internal_speaker">Dahili Hoparlör</string>
-    <string name="manual_mode_global_latency">Manuel mod (Küresel gecikme)</string>
-    <string name="latency_compensation_description">Gecikme telafisi, özellikle Bluetooth cihazları için kullanışlı olan, Gliflerin tam ritimle çalışmasını sağlar.</string>
+    <string name="manual_mode_global_latency">Manuel mod (Genel gecikme)</string>
+    <string name="latency_compensation_description">Gecikme telafisi, özellikle Bluetooth cihazları için kullanışlıdır ve Gliflerin tam olarak ritme göre yanmasını sağlar.</string>
     <string name="latency_compensation">Gecikme Telafisi</string>
 
     <!-- Glyph Screen -->
     <string name="glyph_controls">Glif kontrolleri</string>
     <string name="gamma_control">Gama kontrolü</string>
-    <string name="gamma_description">Daha yüksek bir gama değeri daha vurgulu bir görünüm sağlar, ancak daha az ince detay ve genel parlaklık sunar. Daha düşük bir değer ise daha parlak ancak daha az vurguludur.</string>
-    <string name="light_gamma">Işık Gaması: %.2f</string>
+    <string name="gamma_description">Daha yüksek bir gama değeri, daha az ince ayrıntı ve genel parlaklık ile daha vurucu bir görünüm verir. Daha düşük bir değer ise daha parlak ancak daha az vurucudur.</string>
+    <string name="light_gamma">Işık Gaması: %.1f</string>
     <string name="visualizer_presets">Görselleştirici hazır ayarları</string>
 
     <!-- Settings Screen -->
@@ -27,24 +27,67 @@
     <string name="haptics_tab">Haptik Sekmesi</string>
     <string name="haptics_tab_description">Alt gezinme çubuğundan haptik araçları sekmesini göster veya gizle.</string>
     <string name="app_theme">Uygulama Teması</string>
-    <string name="theme_normal">Normal</string>
-    <string name="theme_nothing_red">Nothing Kırmızısı</string>
-    <string name="theme_help_text">Değişiklikler anında uygulanır ve uygulama yeniden başlatıldığında da kalıcı olur.</string>
+    <string name="theme_normal">OLED Siyah</string>
+    <string name="theme_liquorice">Meyan Kökü Siyahı</string>
+    <string name="theme_light">Nothing Açık</string>
+    <string name="theme_nothing_red">Nothing Kırmızı</string>
+    <string name="theme_help_text">Değişiklikler uygulama yeniden başlatıldıktan sonra uygulanır.</string>
     <string name="typography">Tipografi</string>
     <string name="font_ndot">NDot</string>
     <string name="font_ntype">NType</string>
     <string name="typography_help_text">Uygulama genelinde NDot ve NType yazı tipleri arasında geçiş yapın.</string>
-    <string name="developer_mode">Geliştirici Modu</string>
-    <string name="developer_mode_description">Gelişmiş test ve cihaz taklidi özelliklerini etkinleştirin.</string>
-    <string name="spoof_device">Cihazı Taklit Et</string>
-    <string name="spoof_device_description">Uygulamayı seçilen cihazda çalışıyormuş gibi davranmaya zorlar.</string>
-    <string name="more_settings_coming">Daha fazla ayar yakında...</string>
+    <string name="more_settings_coming">Daha fazla ayar yakında gelecek...</string>
 
     <!-- Haptics Screen -->
     <string name="haptics_title">Haptik</string>
     <string name="haptics_description">Haptik araçları yakında buraya eklenecek. Bu sayfa titreşim ön ayarları, desen testleri ve olaya özel geri bildirim ayarları için hazır.</string>
-    
+    <string name="haptics_header">Haptik</string>
+    <string name="haptics_subtitle">Sese duyarlı titreşim ayarları.</string>
+    <string name="haptics_motor_title">Sese Duyarlı Haptik</string>
+    <string name="haptics_frequency_label">Frekans: %1$d - %2$d Hz</string>
+    <string name="haptics_frequency_desc">Bu aralıktaki ses genliğine göre titreşir.</string>
+    <string name="haptics_amplitude_label">Genlik: %.1fx</string>
+    <string name="haptics_gamma_label">Gama (Tepki): %.1f</string>
+    <string name="experimental_features">Deneysel Özellikler</string>
+    <string name="developer_mode">Geliştirici Modu</string>
+    <string name="developer_mode_description">Gelişmiş test ve cihaz taklidi (spoofing) özelliklerini etkinleştirin.</string>
+    <string name="spoof_device">Cihazı Taklit Et</string>
+    <string name="spoof_device_description">Uygulamayı seçilen cihazda çalışıyormuş gibi davranmaya zorlar.</string>
+    <string name="idle_breathing_title">Boşta Nefes Alma</string>
+    <string name="idle_breathing_desc">Görselleştirici aktifken ancak ses çalmıyorken Glifler hafifçe yanıp söner.</string>
+    <string name="notification_flash_title">Bildirim Flaşı</string>
+    <string name="notification_flash_desc">Görselleştirici çalışırken yeni bir bildirim geldiğinde tüm Glifleri kısa süreliğine yakıp söndürür.</string>
+    <string name="settings_update_tip">İpucu: Yapılandırma güncellemelerini kontrol etmek için bu ekrandayken telefonunuzu sallayabilirsiniz!</string>
+    <string name="start_visualizer">Görselleştiriciyi başlat</string>
+    <string name="stop_visualizer">Görselleştiriciyi durdur</string>
+    <string name="glyph_no_config">Hiçbir yapılandırma yüklenmedi. En son görselleştirici hazır ayarlarını indirmek için lütfen Ayarlar\'dan güncellemeleri kontrol edin.</string>
+    <string name="glyph_debug_title">Android 15 yüklü Nothing Phone (1)</string>
+    <string name="glyph_debug_desc_adb_enabled">Glif özelliklerinin bu cihazda ADB üzerinden Nothing glif hata ayıklama arayüzünün etkinleştirilmesine ihtiyacı var.</string>
+    <string name="glyph_debug_desc_dev_options">Android 15 yüklü Nothing Phone (1) cihazında öncelikle Geliştirici seçeneklerinin etkinleştirilmesi gerekir. Ardından bu ADB komutunu çalıştırın:</string>
+    <string name="glyph_debug_command">adb shell settings put global nt_glyph_interface_debug_enable 1</string>
+    <string name="glyph_debug_instruction">Komutu ADB yüklü bir bilgisayardan bir kez çalıştırın, eğer Glifler hala yanıt vermiyorsa uygulamayı yeniden açın.</string>
+
     <!-- About Screen -->
     <string name="about_title">Hakkında ve diğerleri</string>
-    <string name="about_description">DÜZGÜN, LANET BİR HAKKINDA EKRANINA İHTİYACIMIZ VAR!! Bu sırada bilgi için lütfen GitHub\'a bakın.</string>
+    <string name="about_description">ACİLEN ADAMAKILLI BİR HAKKINDA EKRANINA İHTİYACIMIZ VAR!! O zamana kadar lütfen bilgi için GitHub'a göz atın.</string>
+    <string name="about_intro">Better Nothing Müzik Görselleştirici, yüksek kaliteli ve gerçek zamanlı frekans analizi ile Glyph Arayüzü'nün tüm potansiyelini ortaya çıkarır.</string>
+    <string name="about_section_why">Neden Nothing'in uygulamasından daha iyiyiz:</string>
+    <string name="about_why_1">• 12-bit parlaklık (4096 seviye) vs ~2-bit stok (3 seviye)</string>
+    <string name="about_why_2">• 60 FPS akıcı animasyonlar vs ~25 FPS stok</string>
+    <string name="about_why_3">• Hassas FFT senkronizasyonu vs yarı-rastgele tepki</string>
+    <string name="about_why_4">• Bağımsız alt bölge kontrolü</string>
+    <string name="github_repository">GitHub Deposu</string>
+    <string name="view_source">Kaynağı Görüntüle</string>
+    <string name="version_info">Sürüm %s</string>
+    <string name="media_projection_info">MediaProjection yalnızca gerçek zamanlı görselleştiriciye güç sağlamak için kullanılır. Gereksiz kayıt veya veri depolama işlemi yapılmaz.</string>
+    <string name="credits">Emeği Geçenler</string>
+    <string name="open_github_profile">GitHub profilini aç</string>
+    <string name="credit_alekslevet_role">Kurucu, koordinatör, ana fikir, sahip</string>
+    <string name="credit_rkyzen_role">Android uygulama geliştiricisi (gerçek zamanlı müzik akışı)</string>
+    <string name="credit_oliver_role">Geliştirici</string>
+    <string name="credit_nicouschulas_role">Beni oku ve Viki geliştirmeleri</string>
+    <string name="credit_sebiai_role">Glif modlama ve destek</string>
+    <string name="credit_earnedel_role">Beni oku geliştirmeleri</string>
+    <string name="credit_ake_role">Entegrasyonlu bir müzik uygulaması üzerinde çalışan geliştirici</string>
+    <string name="credit_interlastic_role">Betiği test etmek için Discord botu (kullanımdan kaldırıldı)</string>
 </resources>
