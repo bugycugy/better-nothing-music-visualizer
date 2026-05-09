@@ -50,6 +50,14 @@ class BeatDetectionHapticEngine(context: Context) {
         // This engine does not currently use a multiplier.
     }
 
+    fun resetDetectionState() {
+        prevEnergy = 0f
+        deltaHistoryCount = 0
+        deltaHistoryIndex = 0
+        deltaHistory.fill(0f)
+        sortedDeltaHistory.fill(0f)
+    }
+
     fun performHapticFeedback(magnitude: FloatArray, hapticRange: AudioProcessor.FrequencyRange?) {
         if (vibrator == null || !vibrator.hasVibrator() || hapticRange == null || magnitude.isEmpty()) {
             return
@@ -89,7 +97,7 @@ class BeatDetectionHapticEngine(context: Context) {
     }
 
     private fun pushDelta(delta: Float) {
-        deltaHistory[deltaHistoryIndex] = delta
+        deltaHistory[deltaHistoryIndex] = if (delta > 0f) delta else 0f
         deltaHistoryIndex = (deltaHistoryIndex + 1) % deltaHistory.size
         if (deltaHistoryCount < deltaHistory.size) {
             deltaHistoryCount++

@@ -199,7 +199,7 @@ public class AudioCaptureService extends Service {
                 long now = SystemClock.elapsedRealtime();
                 // If it's been more than 100ms since the last audio frame, manually trigger a frame for breathing
                 if (now - mLastAudioActivityMs > 100) {
-                    processFrame(new float[0], 0f, 0f, mVisualizerConfig, mPresetConfigVersion);
+                    processFrame(new float[0], 0f, mVisualizerConfig, mPresetConfigVersion);
                 }
             }
             if (sIsRunning) {
@@ -223,15 +223,13 @@ public class AudioCaptureService extends Service {
     private static final class PendingFrame {
         final float[] uniquePeaks;
         final float hapticPeak;
-        final float hapticEnergy;
         final AudioProcessor.VisualizerConfig config;
         final int configVersion;
         final long dueAtMs;
 
-        PendingFrame(float[] uniquePeaks, float hapticPeak, float hapticEnergy, AudioProcessor.VisualizerConfig config, int configVersion, long dueAtMs) {
+        PendingFrame(float[] uniquePeaks, float hapticPeak, AudioProcessor.VisualizerConfig config, int configVersion, long dueAtMs) {
             this.uniquePeaks = uniquePeaks;
             this.hapticPeak = hapticPeak;
-            this.hapticEnergy = hapticEnergy;
             this.config = config;
             this.configVersion = configVersion;
             this.dueAtMs = dueAtMs;
@@ -587,17 +585,24 @@ public class AudioCaptureService extends Service {
             mContinuousHapticEngine.stopHaptics();
             mBeatDetectionEngine.stopHaptics();
         }
+        requestTileRefresh();
     }
 
     public void setHapticMode(HapticMode mode) {
         mHapticMode = mode;
         if (mContinuousHapticEngine != null) mContinuousHapticEngine.stopHaptics();
-        if (mBeatDetectionEngine != null) mBeatDetectionEngine.stopHaptics();
+        if (mBeatDetectionEngine != null) {
+            mBeatDetectionEngine.stopHaptics();
+            mBeatDetectionEngine.resetDetectionState();
+        }
     }
 
     public void setHapticFreqRange(float minHz, float maxHz) {
         mHapticMinHz = minHz;
         mHapticMaxHz = maxHz;
+        if (mBeatDetectionEngine != null) {
+            mBeatDetectionEngine.resetDetectionState();
+        }
         mHapticSettingsVersion++;
     }
 
@@ -811,17 +816,17 @@ public class AudioCaptureService extends Service {
             }
 
             float hapticPeak = mHapticEnabled ? result.hapticPeak : 0f;
-            float hapticEnergy = 0f;
-            if (mHapticEnabled && mHapticMode == HapticMode.BEAT_DETECTION && mHapticRange != null) {
-                for (int i = mHapticRange.binLo; i <= mHapticRange.binHi && i < result.magnitude.length; i++) {
-                    hapticEnergy += result.magnitude[i];
+            if (mHapticEnabled) {
+                if (mHapticMode == HapticMode.BASS_TO_AMPLITUDE) {
+                    mContinuousHapticEngine.performHapticFeedback(result.hapticPeak, config);
+                } else {
+                    mBeatDetectionEngine.performHapticFeedback(result.magnitude, mHapticRange);
                 }
             }
 
             pendingFrames.addLast(new PendingFrame(
                     result.uniquePeaks,
                     hapticPeak,
-                    hapticEnergy,
                     config,
                     presetVersion,
                     SystemClock.elapsedRealtime() + mLatencyCompensationMs
@@ -840,24 +845,16 @@ public class AudioCaptureService extends Service {
                 return;
             }
             pendingFrames.removeFirst();
-            processFrame(pendingFrame.uniquePeaks, pendingFrame.hapticPeak, pendingFrame.hapticEnergy, pendingFrame.config, pendingFrame.configVersion);
+            processFrame(pendingFrame.uniquePeaks, pendingFrame.hapticPeak, pendingFrame.config, pendingFrame.configVersion);
         }
     }
 
-    private void processFrame(float[] uniquePeaks, float hapticPeak, float hapticEnergy, AudioProcessor.VisualizerConfig config, int configVersion) {
+    private void processFrame(float[] uniquePeaks, float hapticPeak, AudioProcessor.VisualizerConfig config, int configVersion) {
         if (config == null || configVersion != mPresetConfigVersion) {
             return;
         }
 
-        // Apply haptics here so they follow the same latency queue as glyphs
-        if (mHapticEnabled) {
-            if (mHapticMode == HapticMode.BASS_TO_AMPLITUDE) {
-                mContinuousHapticEngine.performHapticFeedback(hapticPeak, config);
-            } else {
-                mBeatDetectionEngine.performHapticFeedback(hapticEnergy);
-            }
-        }
-
+        // Haptics are already handled in the capture thread for low latency.
         if (!mSessionOpen || mGM == null) {
             return;
         }

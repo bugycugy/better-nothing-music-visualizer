@@ -367,6 +367,7 @@ internal class MainViewModel(application: Application) : AndroidViewModel(applic
         viewModelScope.launch(Dispatchers.IO) {
             ctx.getSharedPreferences("viz_prefs", Context.MODE_PRIVATE)
                 .edit { putBoolean("haptic_motor_enabled", enabled) }
+            HapticsTileService.requestRefresh(ctx)
         }
     }
 
