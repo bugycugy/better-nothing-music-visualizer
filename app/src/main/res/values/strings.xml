@@ -46,7 +46,7 @@
     <string name="haptics_mode_label">Haptic Engine Mode</string>
     <string name="haptics_mode_bass">Bass to Amplitude</string>
     <string name="haptics_mode_beat">Beat Detection</string>
-    <string name="haptics_beat_detection_desc">Vibrates on detected beats within the selected frequency range. More punchy and accurate for fast songs.</string>
+    <string name="haptics_beat_detection_desc">Vibrates on detected beats within the selected frequency range. Smoother but sometimes not as stable. It's a beta feature.</string>
     <string name="haptics_motor_title">Audio-Reactive Haptics</string>
     <string name="haptics_frequency_label">Frequency: %1$d - %2$d Hz</string>
     <string name="haptics_frequency_desc">Vibrates based on audio amplitude in this range.</string>
