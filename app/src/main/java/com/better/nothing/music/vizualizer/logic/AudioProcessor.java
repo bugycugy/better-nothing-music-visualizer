@@ -128,11 +128,12 @@ public class AudioProcessor {
 
         int start = Math.max(0, Math.min(range.binLo, magnitude.length - 1));
         int end = Math.max(start, Math.min(range.binHi, magnitude.length - 1));
-        float sum = 0f;
+        float sumSquares = 0f;
         for (int bin = start; bin <= end; bin++) {
-            sum += magnitude[bin];
+            sumSquares += magnitude[bin] * magnitude[bin];
         }
-        return sum;
+        int count = end - start + 1;
+        return count > 0 ? (float) Math.sqrt(sumSquares / count) : 0f;
     }
 
     private static float[] buildHannWindow(int size) {
