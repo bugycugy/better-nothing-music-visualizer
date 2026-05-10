@@ -46,7 +46,7 @@
     <string name="haptics_mode_label">Haptic Engine Mode</string>
     <string name="haptics_mode_bass">Bass to Amplitude</string>
     <string name="haptics_mode_beat">Beat Detection</string>
-    <string name="haptics_beat_detection_desc">Vibrates on detected beats within the selected frequency range. Smoother but sometimes not as stable. It's a beta feature.</string>
+    <string name="haptics_beat_detection_desc">Vibrates on detected beats within the selected frequency range. Smoother but sometimes not as stable. It\'s a beta feature.</string>
     <string name="haptics_motor_title">Audio-Reactive Haptics</string>
     <string name="haptics_frequency_label">Frequency: %1$d - %2$d Hz</string>
     <string name="haptics_frequency_desc">Vibrates based on audio amplitude in this range.</string>
@@ -75,7 +75,7 @@
     <string name="about_title">About and others</string>
     <string name="about_description">WE NEED A DAMN PROPER ABOUT SCREEN!! In the meantime please check GitHub for info.</string>
     <string name="about_intro">Better Nothing Music Visualizer unlocks the full potential of the Glyph Interface with high-fidelity, real-time frequency analysis.</string>
-    <string name="about_section_why">Why are we better than Nothing\'s implementaion:</string>
+    <string name="about_section_why">Why are we better than Nothing\'s implementation:</string>
     <string name="about_why_1">• 12-bit brightness (4096 levels) vs ~2-bit stock (3 levels)</string>
     <string name="about_why_2">• 60 FPS fluid animations vs ~25 FPS stock</string>
     <string name="about_why_3">• Precise FFT sync vs semi-random response</string>
